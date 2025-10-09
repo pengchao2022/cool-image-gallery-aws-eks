@@ -20,12 +20,6 @@ output "app_frontend_role_arn" {
   value       = aws_iam_role.app_frontend_role.arn
 }
 
-# ALB Controller Role
-output "alb_controller_role_arn" {
-  description = "ALB controller role ARN"
-  value       = aws_iam_role.alb_controller_role.arn
-}
-
 # CI/CD User
 output "cicd_user_access_key" {
   description = "CI/CD user access key ID"

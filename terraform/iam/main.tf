@@ -63,7 +63,7 @@ resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
   role       = aws_iam_role.eks_node_group_role.name
 }
 
-resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
+resource "aws_iam_role_policy_attachment" "ec2_container_registry_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
   role       = aws_iam_role.eks_node_group_role.name
 }
@@ -146,7 +146,7 @@ resource "aws_iam_policy" "app_backend_policy" {
           "s3:DeleteObject",
           "s3:ListBucket",
           "s3:GetObjectVersion",
-          "s3:PutObjectVersion"
+          "s3:PutObjectAcl"
         ]
         Resource = [
           var.s3_bucket_arn,
