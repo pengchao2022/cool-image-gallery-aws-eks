@@ -8,10 +8,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "terraformstatefile090909"
-    key    = "image-for-eks.tfstate"
-    region = "us-east-1"
-    encrypt = true
+    bucket         = "terraformstatefile090909"
+    key            = "image-for-eks.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
     dynamodb_table = "comic-website-tfstate-lock"
   }
 }

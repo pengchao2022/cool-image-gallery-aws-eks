@@ -70,5 +70,55 @@ variable "db_instance_class" {
 variable "eks_instance_types" {
   description = "EKS node group instance types"
   type        = list(string)
-  default     = "t3.micro"
+  default     = ["t3.micro"]
+}
+
+variable "eks_cluster_version" {
+  description = "EKS cluster version"
+  type        = string
+  default     = "1.28"
+}
+
+variable "eks_desired_size" {
+  description = "EKS node group desired size"
+  type        = number
+  default     = 2
+}
+
+variable "eks_max_size" {
+  description = "EKS node group maximum size"
+  type        = number
+  default     = 5
+}
+
+variable "eks_min_size" {
+  description = "EKS node group minimum size"
+  type        = number
+  default     = 1
+}
+
+# S3 变量
+variable "s3_versioning_enabled" {
+  description = "Enable S3 versioning"
+  type        = bool
+  default     = true
+}
+
+variable "s3_lifecycle_days" {
+  description = "S3 lifecycle days for non-current versions"
+  type        = number
+  default     = 30
+}
+
+# ECR 变量
+variable "ecr_keep_images" {
+  description = "Number of images to keep in ECR"
+  type        = number
+  default     = 30
+}
+
+variable "ecr_untagged_expiry_days" {
+  description = "Days to keep untagged images in ECR"
+  type        = number
+  default     = 7
 }

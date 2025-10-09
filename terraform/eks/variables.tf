@@ -31,7 +31,31 @@ variable "eks_node_group_role" {
 variable "instance_types" {
   description = "List of instance types for the node group"
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["t3.micro"]
+}
+
+variable "desired_size" {
+  description = "Desired number of nodes in the node group"
+  type        = number
+  default     = 2
+}
+
+variable "max_size" {
+  description = "Maximum number of nodes in the node group"
+  type        = number
+  default     = 5
+}
+
+variable "min_size" {
+  description = "Minimum number of nodes in the node group"
+  type        = number
+  default     = 1
+}
+
+variable "cluster_version" {
+  description = "Kubernetes version for the EKS cluster"
+  type        = string
+  default     = "1.28"
 }
 
 variable "project_name" {
