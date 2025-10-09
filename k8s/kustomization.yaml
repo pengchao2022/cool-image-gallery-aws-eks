@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: comic-website
+
+resources:
+  - namespaces/comic-website.yaml
+  - configs/backend-config.yaml
+  - configs/frontend-config.yaml
+  - configs/rds-secret.yaml
+  - services/backend-service.yaml
+  - services/frontend-service.yaml
+  - service-accounts/backend-service-account.yaml
+  - service-accounts/frontend-service-account.yaml
+  - deployments/backend-deployment.yaml
+  - deployments/frontend-deployment.yaml
+  - networking/alb-ingress-class.yaml
+  - networking/alb-ingress.yaml
+  - storage/s3-secret.yaml
+  - jobs/database-migration.yaml
+
+images:
+  - name: 123456789012.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend
+    newTag: latest
+  - name: 123456789012.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-frontend
+    newTag: latest
+
+commonLabels:
+  app: comic

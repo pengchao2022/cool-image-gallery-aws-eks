@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: comic-website
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  FRONTEND_URL: "http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
+  DB_PORT: "5432"
+  DB_NAME: "comicdb"
+  DB_USER: "comicadmin"
+  JWT_EXPIRES_IN: "7d"
+  AWS_REGION: "us-east-1"
+  LOG_LEVEL: "info"

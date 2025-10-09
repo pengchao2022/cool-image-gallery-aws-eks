@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-migration
+  namespace: comic-website
+spec:
+  template:
+    metadata:
+      name: database-migration
+    spec:
+      serviceAccountName: comic-backend-sa
+      containers:
+      - name: migration
+        image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend:latest
+        command: ["npm", "run", "migrate"]
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: host
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: "comicdb"
+        - name: DB_USER
+          value: "comicadmin"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: password
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      restartPolicy: Never
+  backoffLimit: 2
+  activeDeadlineSeconds: 300

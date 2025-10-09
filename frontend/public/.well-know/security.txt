@@ -1,0 +1,8 @@
+# Our security address
+Contact: security@comichub.example.com
+Expires: 2024-12-31T23:59:59.000Z
+Encryption: https://comichub.example.com/pgp-key.txt
+Acknowledgments: https://comichub.example.com/security-hall-of-fame
+Policy: https://comichub.example.com/security-policy
+Preferred-Languages: en
+Canonical: https://comichub.example.com/.well-known/security.txt
