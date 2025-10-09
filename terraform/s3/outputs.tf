@@ -23,11 +23,6 @@ output "bucket_regional_domain_name" {
   value       = aws_s3_bucket.comic_storage.bucket_regional_domain_name
 }
 
-output "bucket_website_endpoint" {
-  description = "S3 bucket website endpoint"
-  value       = aws_s3_bucket.comic_storage.website_endpoint
-}
-
 output "bucket_hosted_zone_id" {
   description = "S3 bucket hosted zone ID"
   value       = aws_s3_bucket.comic_storage.hosted_zone_id
