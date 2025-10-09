@@ -84,7 +84,6 @@ module "eks" {
   aws_region          = var.aws_region
   common_tags         = local.common_tags
 }
-
 # 数据源
 data "aws_caller_identity" "current" {}
 

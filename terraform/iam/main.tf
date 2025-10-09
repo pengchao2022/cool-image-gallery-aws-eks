@@ -226,42 +226,6 @@ resource "aws_iam_role_policy_attachment" "app_frontend_policy_attachment" {
   role       = aws_iam_role.app_frontend_role.name
 }
 
-# ALB Controller Role (for OIDC)
-resource "aws_iam_role" "alb_controller_role" {
-  name = "${var.project_name}-${var.environment}-alb-controller-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Effect = "Allow"
-        Principal = {
-          Federated = "arn:aws:iam::${var.account_id}:oidc-provider/${var.oidc_provider_url}"
-        }
-        Condition = {
-          StringEquals = {
-            "${var.oidc_provider_url}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
-            "${var.oidc_provider_url}:aud" = "sts.amazonaws.com"
-          }
-        }
-      }
-    ]
-  })
-
-  tags = merge(
-    var.common_tags,
-    {
-      Name = "${var.project_name}-${var.environment}-alb-controller-role"
-    }
-  )
-}
-
-resource "aws_iam_role_policy_attachment" "alb_controller_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AWSLoadBalancerControllerIAMPolicy"
-  role       = aws_iam_role.alb_controller_role.name
-}
-
 # CI/CD User for GitHub Actions
 resource "aws_iam_user" "cicd_user" {
   name = "${var.project_name}-${var.environment}-cicd-user"

@@ -142,19 +142,38 @@ jobs:
       if: github.ref == 'refs/heads/main'
       uses: azure/setup-helm@v3
 
-    - name: Install ALB Ingress Controller
+    - name: Install ALB Ingress Controller with OIDC
       if: github.ref == 'refs/heads/main'
       run: |
         # Add EKS charts repository
         helm repo add eks https://aws.github.io/eks-charts
         helm repo update
         
-        # 获取 VPC ID
+        # 获取 Terraform 输出
         cd terraform
         VPC_ID=$(terraform output -raw vpc_id)
+        ALB_ROLE_ARN=$(terraform output -raw alb_controller_role_arn)
         cd ..
         
-        # Install AWS Load Balancer Controller
+        echo "🔧 Creating ALB Controller ServiceAccount with OIDC..."
+        
+        # 创建 ServiceAccount 使用 OIDC
+        kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: aws-load-balancer-controller
+          namespace: kube-system
+          labels:
+            app.kubernetes.io/name: aws-load-balancer-controller
+            app.kubernetes.io/component: controller
+          annotations:
+            eks.amazonaws.com/role-arn: $ALB_ROLE_ARN
+        EOF
+        
+        echo "📝 Creating ALB Controller values file..."
+        
+        # 创建 Helm values 文件
         cat > alb-values.yaml <<EOF
         clusterName: ${{ env.CLUSTER_NAME }}
         serviceAccount:
@@ -164,12 +183,60 @@ jobs:
         vpcId: $VPC_ID
         image:
           repository: 602401143452.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/amazon/aws-load-balancer-controller
+        replicaCount: 2
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        podLabels:
+          app.kubernetes.io/name: aws-load-balancer-controller
+          app.kubernetes.io/component: controller
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+        - effect: "NoSchedule"
+          key: "node-role.kubernetes.io/master"
+        - effect: "NoExecute"
+          key: "node-role.kubernetes.io/control-plane"
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                    - aws-load-balancer-controller
+                topologyKey: kubernetes.io/hostname
         EOF
         
+        echo "🚀 Installing AWS Load Balancer Controller..."
         helm upgrade -i aws-load-balancer-controller eks/aws-load-balancer-controller \
           -n kube-system \
           -f alb-values.yaml \
-          --version 1.6.1
+          --version 1.6.1 \
+          --wait
+        
+        echo "⏳ Waiting for ALB Controller pods to be ready..."
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller -n kube-system --timeout=300s
+        
+        echo "✅ ALB Controller installed successfully with OIDC!"
+
+    - name: Save Infrastructure Outputs
+      if: github.ref == 'refs/heads/main'
+      run: |
+        cd terraform
+        echo "DB_HOST=$(terraform output -raw rds_endpoint)" >> $GITHUB_ENV
+        echo "S3_BUCKET_NAME=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
+        echo "BACKEND_ECR_URL=$(terraform output -raw backend_ecr_repository_url)" >> $GITHUB_ENV
+        echo "FRONTEND_ECR_URL=$(terraform output -raw frontend_ecr_repository_url)" >> $GITHUB_ENV
 
   deploy-applications:
     name: "Deploy Applications to EKS"
@@ -244,10 +311,31 @@ jobs:
         
         echo "🔍 Pods status:"
         kubectl get pods -n ${{ env.NAMESPACE }} -o wide
+        
+        echo "🔧 ALB Controller status:"
+        kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
 
     - name: Health Check
       run: |
         # 等待 ALB 创建
-        sleep 30
+        echo "⏳ Waiting for ALB to be created..."
+        sleep 60
+        
         ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
-        echo "🌐 ALB URL: http://$ALB_URL"
+        
+        if [ "$ALB_URL" != "pending" ]; then
+          echo "🌐 ALB URL: http://$ALB_URL"
+          echo "🔍 Performing health check..."
+          # 重试几次健康检查
+          for i in {1..5}; do
+            if curl -f http://$ALB_URL/health; then
+              echo "✅ Health check passed!"
+              break
+            else
+              echo "⚠️ Health check attempt $i failed, retrying in 10 seconds..."
+              sleep 10
+            fi
+          done
+        else
+          echo "⏰ ALB is still being created, check AWS console for progress"
+        fi
