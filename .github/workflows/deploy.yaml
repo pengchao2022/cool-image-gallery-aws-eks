@@ -35,57 +35,6 @@ jobs:
       with:
         terraform_version: 1.5.0
 
-    - name: Create S3 Backend Bucket
-      run: |
-        # 检查 bucket 是否已存在
-        if aws s3 ls "s3://${{ env.TF_BACKEND_BUCKET }}" 2>/dev/null; then
-          echo "✅ S3 bucket already exists"
-        else
-          echo "🏗️ Creating S3 bucket for Terraform backend..."
-          # us-east-1 区域创建 bucket 时不指定 LocationConstraint
-          aws s3api create-bucket \
-            --bucket ${{ env.TF_BACKEND_BUCKET }} \
-            --region ${{ env.AWS_REGION }}
-          
-          echo "🔄 Enabling versioning..."
-          aws s3api put-bucket-versioning \
-            --bucket ${{ env.TF_BACKEND_BUCKET }} \
-            --versioning-configuration Status=Enabled
-          
-          echo "🔐 Enabling encryption..."
-          aws s3api put-bucket-encryption \
-            --bucket ${{ env.TF_BACKEND_BUCKET }} \
-            --server-side-encryption-configuration '{
-              "Rules": [
-                {
-                  "ApplyServerSideEncryptionByDefault": {
-                    "SSEAlgorithm": "AES256"
-                  }
-                }
-              ]
-            }'
-        fi
-
-    - name: Create DynamoDB Table for State Locking
-      run: |
-        # 检查 DynamoDB 表是否已存在
-        if aws dynamodb describe-table --table-name comic-website-tfstate-lock --region ${{ env.AWS_REGION }} 2>/dev/null; then
-          echo "✅ DynamoDB table already exists"
-        else
-          echo "🏗️ Creating DynamoDB table for state locking..."
-          aws dynamodb create-table \
-            --table-name comic-website-tfstate-lock \
-            --attribute-definitions AttributeName=LockID,AttributeType=S \
-            --key-schema AttributeName=LockID,KeyType=HASH \
-            --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
-            --region ${{ env.AWS_REGION }}
-          
-          echo "⏳ Waiting for table to be active..."
-          aws dynamodb wait table-exists \
-            --table-name comic-website-tfstate-lock \
-            --region ${{ env.AWS_REGION }}
-        fi
-
     - name: Terraform Init
       id: init
       run: |
@@ -191,30 +140,6 @@ jobs:
           limits:
             cpu: 500m
             memory: 512Mi
-        podLabels:
-          app.kubernetes.io/name: aws-load-balancer-controller
-          app.kubernetes.io/component: controller
-        nodeSelector:
-          kubernetes.io/arch: amd64
-        tolerations:
-        - key: "CriticalAddonsOnly"
-          operator: "Exists"
-        - effect: "NoSchedule"
-          key: "node-role.kubernetes.io/master"
-        - effect: "NoExecute"
-          key: "node-role.kubernetes.io/control-plane"
-        affinity:
-          podAntiAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                  - key: app.kubernetes.io/name
-                    operator: In
-                    values:
-                    - aws-load-balancer-controller
-                topologyKey: kubernetes.io/hostname
         EOF
         
         echo "🚀 Installing AWS Load Balancer Controller..."
@@ -228,15 +153,6 @@ jobs:
         kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller -n kube-system --timeout=300s
         
         echo "✅ ALB Controller installed successfully with OIDC!"
-
-    - name: Save Infrastructure Outputs
-      if: github.ref == 'refs/heads/main'
-      run: |
-        cd terraform
-        echo "DB_HOST=$(terraform output -raw rds_endpoint)" >> $GITHUB_ENV
-        echo "S3_BUCKET_NAME=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
-        echo "BACKEND_ECR_URL=$(terraform output -raw backend_ecr_repository_url)" >> $GITHUB_ENV
-        echo "FRONTEND_ECR_URL=$(terraform output -raw frontend_ecr_repository_url)" >> $GITHUB_ENV
 
   deploy-applications:
     name: "Deploy Applications to EKS"
@@ -264,70 +180,131 @@ jobs:
     - name: Setup Kubernetes tools
       uses: azure/setup-kubectl@v3
 
-    - name: Setup script permissions
-      run: chmod +x scripts/*.sh
-
     - name: Get Terraform Outputs
       run: |
         cd terraform
         DB_HOST=$(terraform output -raw rds_endpoint)
         S3_BUCKET_NAME=$(terraform output -raw s3_bucket_name)
+        BACKEND_ECR_URL=$(terraform output -raw backend_ecr_repository_url)
+        FRONTEND_ECR_URL=$(terraform output -raw frontend_ecr_repository_url)
         echo "DB_HOST=$DB_HOST" >> $GITHUB_ENV
         echo "S3_BUCKET_NAME=$S3_BUCKET_NAME" >> $GITHUB_ENV
+        echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
+        echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
 
-    - name: Build and Push Docker images
+    - name: Login to ECR
       run: |
-        ./scripts/build-push-images.sh ${{ secrets.AWS_ACCOUNT_ID }}
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+    - name: Build and Push Backend Docker Image
+      run: |
+        echo "🏗️ Building backend Docker image..."
+        cd backend
+        docker build -t $BACKEND_ECR_URL:${GITHUB_SHA:0:8} .
+        echo "🚀 Pushing backend image to ECR..."
+        docker push $BACKEND_ECR_URL:${GITHUB_SHA:0:8}
+        cd ..
+        echo "✅ Backend image pushed: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
+
+    - name: Build and Push Frontend Docker Image
+      run: |
+        echo "🏗️ Building frontend Docker image..."
+        cd frontend
+        docker build -t $FRONTEND_ECR_URL:${GITHUB_SHA:0:8} .
+        echo "🚀 Pushing frontend image to ECR..."
+        docker push $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
+        cd ..
+        echo "✅ Frontend image pushed: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
 
     - name: Setup Kubernetes Secrets
       run: |
-        ./scripts/setup-secrets.sh
-      env:
-        DB_HOST: ${{ env.DB_HOST }}
-        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        JWT_SECRET: ${{ secrets.JWT_SECRET }}
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        S3_BUCKET_NAME: ${{ env.S3_BUCKET_NAME }}
+        echo "🔐 Setting up Kubernetes secrets..."
+        
+        # RDS Secret
+        kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: rds-secret
+          namespace: ${{ env.NAMESPACE }}
+        type: Opaque
+        stringData:
+          host: "$DB_HOST"
+          port: "5432"
+          username: "comicadmin"
+          database: "comicdb"
+          password: "${{ secrets.DB_PASSWORD }}"
+        EOF
 
-    - name: Deploy Applications
+        # Backend Application Secrets
+        kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: backend-secrets
+          namespace: ${{ env.NAMESPACE }}
+        type: Opaque
+        stringData:
+          JWT_SECRET: "${{ secrets.JWT_SECRET }}"
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          S3_BUCKET_NAME: "$S3_BUCKET_NAME"
+        EOF
+
+        echo "✅ Kubernetes secrets created successfully"
+
+    - name: Deploy Applications to EKS
       run: |
-        ./scripts/deploy-k8s.sh
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        DB_HOST: ${{ env.DB_HOST }}
-        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        JWT_SECRET: ${{ secrets.JWT_SECRET }}
-        S3_BUCKET_NAME: ${{ env.S3_BUCKET_NAME }}
+        echo "🚀 Deploying applications to EKS..."
+        
+        # 创建命名空间（如果不存在）
+        kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+        
+        # 更新部署文件中的镜像标签
+        sed -i "s|latest|${GITHUB_SHA:0:8}|g" k8s-manifests/deployments/backend-deployment.yaml
+        sed -i "s|latest|${GITHUB_SHA:0:8}|g" k8s-manifests/deployments/frontend-deployment.yaml
+        
+        # 应用所有 Kubernetes 配置
+        kubectl apply -k k8s-manifests/
+        
+        echo "✅ Applications deployed to EKS"
+
+    - name: Wait for Deployments
+      run: |
+        echo "⏳ Waiting for deployments to be ready..."
+        kubectl wait --for=condition=available --timeout=600s deployment/backend-deployment -n ${{ env.NAMESPACE }}
+        kubectl wait --for=condition=available --timeout=600s deployment/frontend-deployment -n ${{ env.NAMESPACE }}
+        echo "✅ All deployments are ready"
 
     - name: Verify Deployment
       run: |
-        echo "📊 Final deployment status:"
-        kubectl get deployments,services,ingress -n ${{ env.NAMESPACE }}
+        echo "📊 Deployment Status:"
+        echo "=== Deployments ==="
+        kubectl get deployments -n ${{ env.NAMESPACE }}
         
-        echo "🔍 Pods status:"
+        echo "=== Pods ==="
         kubectl get pods -n ${{ env.NAMESPACE }} -o wide
         
-        echo "🔧 ALB Controller status:"
-        kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+        echo "=== Services ==="
+        kubectl get services -n ${{ env.NAMESPACE }}
+        
+        echo "=== Ingress ==="
+        kubectl get ingress -n ${{ env.NAMESPACE }}
 
     - name: Health Check
       run: |
+        echo "🔍 Performing health check..."
+        
         # 等待 ALB 创建
-        echo "⏳ Waiting for ALB to be created..."
-        sleep 60
+        sleep 30
         
         ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
         
         if [ "$ALB_URL" != "pending" ]; then
           echo "🌐 ALB URL: http://$ALB_URL"
-          echo "🔍 Performing health check..."
-          # 重试几次健康检查
-          for i in {1..5}; do
+          
+          # 重试健康检查
+          for i in {1..10}; do
             if curl -f http://$ALB_URL/health; then
               echo "✅ Health check passed!"
               break
