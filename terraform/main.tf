@@ -66,7 +66,7 @@ module "iam" {
 # EKS 模块
 # EKS 模块
 module "eks" {
-  source = "./modules/eks"
+  source = "./eks"
 
   cluster_name        = "${var.project_name}-${var.environment}"
   node_group_name     = "${var.project_name}-nodegroup"
