@@ -106,7 +106,6 @@ resource "aws_s3_bucket_cors_configuration" "comic_storage" {
 # Bucket Policy for EKS access
 resource "aws_s3_bucket_policy" "comic_storage" {
   bucket = aws_s3_bucket.comic_storage.id
-
   policy = data.aws_iam_policy_document.comic_storage.json
 }
 
@@ -125,8 +124,6 @@ data "aws_iam_policy_document" "comic_storage" {
       "s3:PutObject",
       "s3:DeleteObject",
       "s3:ListBucket",
-      "s3:GetObjectVersion",
-      "s3:PutObjectVersion",
     ]
 
     resources = [
