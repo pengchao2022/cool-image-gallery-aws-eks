@@ -1,6 +1,48 @@
+# Backend ECR Repository
+resource "aws_ecr_repository" "backend" {
+  name                 = "${var.project_name}-${var.environment}-backend"
+  image_tag_mutability = var.image_tag_mutability
+
+  image_scanning_configuration {
+    scan_on_push = var.scan_on_push
+  }
+
+  encryption_configuration {
+    encryption_type = var.encryption_type
+  }
+
+  tags = merge(
+    var.common_tags,
+    {
+      Name = "${var.project_name}-${var.environment}-backend"
+    }
+  )
+}
+
+# Frontend ECR Repository
+resource "aws_ecr_repository" "frontend" {
+  name                 = "${var.project_name}-${var.environment}-frontend"
+  image_tag_mutability = var.image_tag_mutability
+
+  image_scanning_configuration {
+    scan_on_push = var.scan_on_push
+  }
+
+  encryption_configuration {
+    encryption_type = var.encryption_type
+  }
+
+  tags = merge(
+    var.common_tags,
+    {
+      Name = "${var.project_name}-${var.environment}-frontend"
+    }
+  )
+}
+
 # Backend Repository Lifecycle Policy
-resource "aws_ecr_lifecycle_policy" "backend_policy" {
-  repository = aws_ecr_repository.backend_repo.name
+resource "aws_ecr_lifecycle_policy" "backend" {
+  repository = aws_ecr_repository.backend.name
 
   policy = jsonencode({
     rules = [
@@ -34,8 +76,8 @@ resource "aws_ecr_lifecycle_policy" "backend_policy" {
 }
 
 # Frontend Repository Lifecycle Policy
-resource "aws_ecr_lifecycle_policy" "frontend_policy" {
-  repository = aws_ecr_repository.frontend_repo.name
+resource "aws_ecr_lifecycle_policy" "frontend" {
+  repository = aws_ecr_repository.frontend.name
 
   policy = jsonencode({
     rules = [
@@ -63,6 +105,60 @@ resource "aws_ecr_lifecycle_policy" "frontend_policy" {
         action = {
           type = "expire"
         }
+      }
+    ]
+  })
+}
+
+# Backend Repository Policy
+resource "aws_ecr_repository_policy" "backend" {
+  repository = aws_ecr_repository.backend.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ECRPolicy"
+        Effect = "Allow"
+        Principal = {
+          AWS = var.ecr_access_principals
+        }
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
+      }
+    ]
+  })
+}
+
+# Frontend Repository Policy
+resource "aws_ecr_repository_policy" "frontend" {
+  repository = aws_ecr_repository.frontend.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ECRPolicy"
+        Effect = "Allow"
+        Principal = {
+          AWS = var.ecr_access_principals
+        }
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
       }
     ]
   })
