@@ -1,2 +1,2 @@
-# cool-image-gallery-aws-eks
+# COOL-IMAGE-GALLERY-AWS-EKS
 devops demo
