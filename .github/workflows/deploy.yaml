@@ -60,30 +60,6 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}"
           terraform apply -auto-approve tfplan
 
-      - name: 📋 Get Terraform Outputs
-        run: |
-          cd terraform
-          echo "🔍 Checking Terraform outputs..."
-          
-          # 检查是否有输出
-          terraform output || echo "No outputs found"
-          
-          # 尝试获取 ECR URLs，如果失败则使用默认值
-          BACKEND_ECR_URL=$(terraform output -raw backend_ecr_repository_url 2>/dev/null || echo "")
-          FRONTEND_ECR_URL=$(terraform output -raw frontend_ecr_repository_url 2>/dev/null || echo "")
-          
-          if [ -z "$BACKEND_ECR_URL" ]; then
-            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-            BACKEND_ECR_URL="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend"
-            FRONTEND_ECR_URL="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend"
-            echo "⚠️ Using default ECR URLs"
-          fi
-          
-          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
-          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
-          echo "✅ Backend ECR: $BACKEND_ECR_URL"
-          echo "✅ Frontend ECR: $FRONTEND_ECR_URL"
-
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
@@ -153,13 +129,19 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔍 Get AWS Account ID and ECR Registry
+      - name: 🔍 Get AWS Account ID and ECR URLs
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
           ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          BACKEND_ECR_URL="$ECR_REGISTRY/comic-website-backend"
+          FRONTEND_ECR_URL="$ECR_REGISTRY/comic-website-frontend"
           echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
+          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
+          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
           echo "✅ ECR Registry: $ECR_REGISTRY"
+          echo "✅ Backend ECR: $BACKEND_ECR_URL"
+          echo "✅ Frontend ECR: $FRONTEND_ECR_URL"
 
       - name: 🔐 Login to ECR
         run: |
@@ -170,19 +152,19 @@ jobs:
         run: |
           cd backend
           echo "🏗 Building backend image..."
-          docker build -t ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8} .
+          docker build -t $BACKEND_ECR_URL:${GITHUB_SHA:0:8} .
           echo "🚀 Pushing backend image..."
-          docker push ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
-          echo "✅ Backend image pushed: ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}"
+          docker push $BACKEND_ECR_URL:${GITHUB_SHA:0:8}
+          echo "✅ Backend image pushed: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
 
       - name: 🎨 Build and Push Frontend Image
         run: |
           cd frontend
           echo "🏗 Building frontend image..."
-          docker build -t ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8} .
+          docker build -t $FRONTEND_ECR_URL:${GITHUB_SHA:0:8} .
           echo "🚀 Pushing frontend image..."
-          docker push ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
-          echo "✅ Frontend image pushed: ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}"
+          docker push $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
+          echo "✅ Frontend image pushed: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
 
       - name: 🔑 Apply Kubernetes Secrets
         run: |
@@ -213,8 +195,8 @@ jobs:
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
 
           echo "🔧 Patching deployments with new image versions..."
-          BACKEND_IMAGE=${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
-          FRONTEND_IMAGE=${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          BACKEND_IMAGE=$BACKEND_ECR_URL:${GITHUB_SHA:0:8}
+          FRONTEND_IMAGE=$FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
 
           kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
