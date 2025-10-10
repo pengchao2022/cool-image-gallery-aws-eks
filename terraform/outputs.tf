@@ -36,3 +36,34 @@ output "vpc_id" {
   description = "VPC ID"
   value       = module.vpc.vpc_id
 }
+
+# terraform/outputs.tf
+
+# RDS 相关输出
+output "rds_endpoint" {
+  description = "RDS instance endpoint"
+  value       = module.rds.db_endpoint
+}
+
+output "rds_port" {
+  description = "RDS instance port"
+  value       = module.rds.db_port
+}
+
+output "rds_username" {
+  description = "RDS master username"
+  value       = module.rds.db_username
+  sensitive   = false
+}
+
+output "rds_database_name" {
+  description = "RDS database name"
+  value       = module.rds.db_name
+}
+
+# 添加密码输出
+output "rds_password" {
+  description = "RDS master password"
+  value       = module.rds.db_password
+  sensitive   = false
+}

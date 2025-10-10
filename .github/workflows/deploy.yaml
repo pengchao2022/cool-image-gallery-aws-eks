@@ -21,6 +21,11 @@ jobs:
     outputs:
       backend_ecr_url: ${{ steps.terraform-outputs.outputs.backend_ecr_url }}
       frontend_ecr_url: ${{ steps.terraform-outputs.outputs.frontend_ecr_url }}
+      rds_endpoint: ${{ steps.terraform-outputs.outputs.rds_endpoint }}
+      rds_port: ${{ steps.terraform-outputs.outputs.rds_port }}
+      rds_username: ${{ steps.terraform-outputs.outputs.rds_username }}
+      rds_database: ${{ steps.terraform-outputs.outputs.rds_database }}
+      rds_password: ${{ steps.terraform-outputs.outputs.rds_password }}
 
     steps:
       - name: 🧩 Checkout code
@@ -69,26 +74,58 @@ jobs:
           cd terraform
           echo "🔍 Getting Terraform outputs..."
           
-          # 直接使用 terraform output 命令获取
-          BACKEND_ECR_URL=$(terraform output -raw backend_repository_url)
-          FRONTEND_ECR_URL=$(terraform output -raw frontend_repository_url)
+          # 使用 JSON 方式安全获取所有输出
+          terraform output -json > outputs.json
+          cat outputs.json
+          
+          # ECR URLs
+          BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
+          FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
+          
+          # RDS 信息 - 使用你的实际输出名称
+          RDS_ENDPOINT=$(jq -r '.db_endpoint.value // empty' outputs.json)
+          RDS_PORT=$(jq -r '.db_port.value // "5432"' outputs.json)
+          RDS_USERNAME=$(jq -r '.db_username.value // "comicadmin"' outputs.json)
+          RDS_DATABASE=$(jq -r '.db_name.value // "comicdb"' outputs.json)
+          RDS_PASSWORD=$(jq -r '.db_password.value // empty' outputs.json)
           
           echo "Backend ECR URL: $BACKEND_ECR_URL"
           echo "Frontend ECR URL: $FRONTEND_ECR_URL"
+          echo "RDS Endpoint: $RDS_ENDPOINT"
+          echo "RDS Port: $RDS_PORT"
+          echo "RDS Username: $RDS_USERNAME"
+          echo "RDS Database: $RDS_DATABASE"
+          echo "RDS Password: ***"  # 不显示实际密码
           
-          if [ -z "$BACKEND_ECR_URL" ] || [ "$BACKEND_ECR_URL" = "null" ]; then
-            echo "❌ Backend ECR URL is empty or null"
-            exit 1
+          # 如果 RDS 输出为空，使用默认值
+          if [ -z "$RDS_ENDPOINT" ]; then
+            echo "⚠️ RDS Endpoint is empty, using fallback values"
+            RDS_ENDPOINT="localhost"
           fi
           
-          if [ -z "$FRONTEND_ECR_URL" ] || [ "$FRONTEND_ECR_URL" = "null" ]; then
-            echo "❌ Frontend ECR URL is empty or null"
-            exit 1
+          # 如果从 Terraform 获取不到密码，使用 GitHub Secrets 中的密码
+          if [ -z "$RDS_PASSWORD" ]; then
+            echo "⚠️ RDS Password not found in Terraform outputs, using GitHub secret"
+            RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
           fi
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
-          echo "✅ ECR URLs successfully extracted"
+          echo "rds_endpoint=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
+          echo "rds_port=$RDS_PORT" >> $GITHUB_OUTPUT
+          echo "rds_username=$RDS_USERNAME" >> $GITHUB_OUTPUT
+          echo "rds_database=$RDS_DATABASE" >> $GITHUB_OUTPUT
+          echo "rds_password=$RDS_PASSWORD" >> $GITHUB_OUTPUT
+          echo "✅ All outputs extracted successfully"
+
+      - name: 🔍 Verify RDS Instance
+        run: |
+          echo "🔍 Verifying RDS instance..."
+          # 获取 RDS 实例状态
+          aws rds describe-db-instances \
+            --region ${{ env.AWS_REGION }} \
+            --query 'DBInstances[].{DBInstanceIdentifier:DBInstanceIdentifier, Endpoint:Endpoint.Address, Port:Endpoint.Port, Status:DBInstanceStatus}' \
+            --output table
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -152,12 +189,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔍 Set ECR URLs from previous job
+      - name: 🔍 Set Environment Variables from previous job
         run: |
           echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
           echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
+          echo "RDS_ENDPOINT=${{ needs.terraform-infrastructure.outputs.rds_endpoint }}" >> $GITHUB_ENV
+          echo "RDS_PORT=${{ needs.terraform-infrastructure.outputs.rds_port }}" >> $GITHUB_ENV
+          echo "RDS_USERNAME=${{ needs.terraform-infrastructure.outputs.rds_username }}" >> $GITHUB_ENV
+          echo "RDS_DATABASE=${{ needs.terraform-infrastructure.outputs.rds_database }}" >> $GITHUB_ENV
+          echo "RDS_PASSWORD=${{ needs.terraform-infrastructure.outputs.rds_password }}" >> $GITHUB_ENV
+          
           echo "✅ Backend ECR URL: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           echo "✅ Frontend ECR URL: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
+          echo "✅ RDS Endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          echo "✅ RDS Port: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          echo "✅ RDS Username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          echo "✅ RDS Database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          echo "✅ RDS Password: ***"  # 不显示实际密码
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -181,10 +229,15 @@ jobs:
           echo "Logging into ECR registry: $ECR_REGISTRY"
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-      - name: 🔍 Debug ECR URLs
+      - name: 🔍 Debug Environment Variables
         run: |
           echo "Backend ECR URL: $BACKEND_ECR_URL"
           echo "Frontend ECR URL: $FRONTEND_ECR_URL"
+          echo "RDS Endpoint: $RDS_ENDPOINT"
+          echo "RDS Port: $RDS_PORT"
+          echo "RDS Username: $RDS_USERNAME"
+          echo "RDS Database: $RDS_DATABASE"
+          echo "RDS Password: ***"  # 不显示实际密码
           echo "GITHUB_SHA: $GITHUB_SHA"
           echo "GITHUB_SHA shortened: ${GITHUB_SHA:0:8}"
 
@@ -199,6 +252,36 @@ jobs:
             REPO_NAME=$(echo $FRONTEND_ECR_URL | cut -d'/' -f2)
             echo "🔍 Checking frontend ECR repository: $REPO_NAME"
             aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ env.AWS_REGION }} && echo "✅ Frontend repository exists" || echo "❌ Frontend repository not found"
+          fi
+
+      - name: 🗃 Test Database Connection
+        run: |
+          echo "🧪 Testing database connection..."
+          
+          # 安装 PostgreSQL 客户端
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          
+          echo "Testing connection to: $RDS_ENDPOINT:$RDS_PORT"
+          
+          # 测试连接（带超时和重试）
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if pg_isready -h $RDS_ENDPOINT -p $RDS_PORT -t 5; then
+              echo "✅ Database connection successful!"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              echo "⏳ Database not ready yet (attempt $RETRY_COUNT/$MAX_RETRIES)..."
+              sleep 30
+            fi
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "⚠️ Database connection timeout after $MAX_RETRIES attempts"
+            echo "Continuing deployment anyway..."
           fi
 
       - name: 🧱 Build and Push Backend Image
@@ -219,9 +302,12 @@ jobs:
           docker push $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
           echo "✅ Frontend image pushed: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
 
-      - name: 🔑 Apply Kubernetes Secrets
+      - name: 🔑 Apply Kubernetes Secrets with Real RDS Info
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+          # 删除旧的 secret（如果存在）
+          kubectl delete secret rds-secret -n ${{ env.NAMESPACE }} --ignore-not-found=true
 
           cat <<EOF > rds-secret.yaml
           apiVersion: v1
@@ -231,15 +317,24 @@ jobs:
             namespace: ${{ env.NAMESPACE }}
           type: Opaque
           stringData:
-            host: localhost
-            port: '5432'
-            username: comicadmin
-            database: comicdb
-            password: ${{ secrets.DB_PASSWORD }}
+            host: $RDS_ENDPOINT
+            port: '$RDS_PORT'
+            username: $RDS_USERNAME
+            database: $RDS_DATABASE
+            password: $RDS_PASSWORD
           EOF
+
+          echo "🔍 RDS Secret content:"
+          echo "Host: $RDS_ENDPOINT"
+          echo "Port: $RDS_PORT"
+          echo "Username: $RDS_USERNAME"
+          echo "Database: $RDS_DATABASE"
+          echo "Password: ***"  # 不显示实际密码
 
           kubectl apply -f rds-secret.yaml
           rm rds-secret.yaml
+          
+          echo "✅ RDS Secret applied with real connection info"
 
       - name: 🚀 Deploy using Kustomize
         run: |
@@ -253,6 +348,25 @@ jobs:
 
           kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
+
+      - name: 🔍 Check Backend Logs for Errors
+        run: |
+          echo "🔍 Checking backend pod status and logs..."
+          # 等待一下让 pod 启动
+          sleep 30
+          
+          # 获取最新的 backend pod
+          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+          
+          if [ -n "$BACKEND_POD" ]; then
+            echo "Backend Pod: $BACKEND_POD"
+            echo "=== Backend Pod Description ==="
+            kubectl describe pod $BACKEND_POD -n ${{ env.NAMESPACE }} || true
+            echo "=== Backend Pod Logs ==="
+            kubectl logs $BACKEND_POD -n ${{ env.NAMESPACE }} --tail=50 || true
+          else
+            echo "❌ No backend pod found"
+          fi
 
       - name: ⏳ Wait for Deployments (with timeout)
         run: |

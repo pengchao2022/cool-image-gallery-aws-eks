@@ -1,3 +1,5 @@
+# terraform/rds/outputs.tf
+
 output "db_instance_id" {
   description = "RDS instance ID"
   value       = aws_db_instance.main.id
@@ -31,6 +33,13 @@ output "db_name" {
 output "db_username" {
   description = "Database username"
   value       = aws_db_instance.main.username
+  sensitive   = true
+}
+
+# 添加密码输出
+output "db_password" {
+  description = "Database password"
+  value       = aws_db_instance.main.password
   sensitive   = true
 }
 
