@@ -24,7 +24,7 @@ jobs:
       rds_endpoint: ${{ steps.terraform-outputs.outputs.rds_endpoint }}
       rds_port: ${{ steps.terraform-outputs.outputs.rds_port }}
       rds_username: ${{ steps.terraform-outputs.outputs.rds_username }}
-      rds_database: ${{ steps.terraform-outputs.outputs.rds_database }}
+      rds_database: ${{ steps.terraform-infrastructure.outputs.rds_database }}
       rds_password: ${{ steps.terraform-outputs.outputs.rds_password }}
 
     steps:
@@ -94,7 +94,7 @@ jobs:
           echo "RDS Port: $RDS_PORT"
           echo "RDS Username: ***"
           echo "RDS Database: $RDS_DATABASE"
-          echo "RDS Password: ***"
+          echo "RDS Password: *** (length: ${#RDS_PASSWORD})"
           
           # 验证关键输出
           if [ -z "$BACKEND_ECR_URL" ]; then
@@ -109,6 +109,11 @@ jobs:
           
           if [ -z "$RDS_ENDPOINT" ]; then
             echo "❌ RDS Endpoint is empty"
+            exit 1
+          fi
+
+          if [ -z "$RDS_PASSWORD" ]; then
+            echo "❌ RDS Password is empty - this will cause database connection failures"
             exit 1
           fi
           
@@ -230,7 +235,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
           echo "Checking if backend image exists: $BACKEND_IMAGE"
           
-          # 使用 docker manifest inspect 检查镜像是否存在 :cite[7]
+          # 使用 docker manifest inspect 检查镜像是否存在
           if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
             echo "✅ Backend image already exists, skipping build"
             echo "image_exists=true" >> $GITHUB_OUTPUT
@@ -320,6 +325,7 @@ jobs:
           echo "✅ Backend Image: ${{ needs.build-and-push-images.outputs.backend_image }}"
           echo "✅ Frontend Image: ${{ needs.build-and-push-images.outputs.frontend_image }}"
           echo "✅ RDS Endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          echo "✅ RDS Password: *** (length: ${#RDS_PASSWORD})"
 
       - name: 🔍 Clean RDS Endpoint
         run: |
@@ -345,6 +351,7 @@ jobs:
           echo "RDS Port: $RDS_PORT"
           echo "RDS Database: $RDS_DATABASE"
           echo "RDS Username: $RDS_USERNAME"
+          echo "RDS Password: *** (set from Terraform output)"
           echo ""
           echo "⚠️  IMPORTANT: RDS Security Configuration"
           echo "================================================"
@@ -379,7 +386,7 @@ jobs:
             port: '$RDS_PORT'
             username: $RDS_USERNAME
             database: $RDS_DATABASE
-            password: $RDS_PASSWORD
+            password: '$RDS_PASSWORD'
           EOF
 
           echo "🔍 RDS Secret content:"
@@ -387,12 +394,29 @@ jobs:
           echo "Port: $RDS_PORT"
           echo "Username: $RDS_USERNAME"
           echo "Database: $RDS_DATABASE"
-          echo "Password: ***"
+          echo "Password: *** (from Terraform output)"
 
           kubectl apply -f rds-secret.yaml
           rm rds-secret.yaml
           
           echo "✅ RDS Secret applied with real connection info"
+
+      - name: 🔍 Verify RDS Secret
+        run: |
+          echo "🔍 Verifying RDS secret was created correctly..."
+          sleep 5
+          
+          # 检查 secret 是否存在
+          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o yaml
+          
+          # 验证密码字段（不显示实际密码）
+          PASSWORD_SET=$(kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data.password}' | base64 -d)
+          if [ -n "$PASSWORD_SET" ]; then
+            echo "✅ RDS password is set (length: ${#PASSWORD_SET} characters)"
+          else
+            echo "❌ RDS password is empty!"
+            exit 1
+          fi
 
       - name: 🚀 Deploy using Kustomize
         run: |
