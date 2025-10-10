@@ -1,29 +1,40 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# 命名空间（对应你之前创建的 comic-website）
 namespace: comic-website
 
+# 给所有资源统一打标签（推荐）
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: comic-website
+      app.kubernetes.io/managed-by: kustomize
+
+# 按目录结构列出所有资源
 resources:
+  # 命名空间
   - namespaces/comic-website.yaml
+
+  # Configs
   - configs/backend-config.yaml
   - configs/frontend-config.yaml
   - configs/rds-secret.yaml
-  - services/backend-service.yaml
-  - services/frontend-service.yaml
-  - service-accounts/backend-service-account.yaml
-  - service-accounts/frontend-service-account.yaml
+
+  # Deployments
   - deployments/backend-deployment.yaml
   - deployments/frontend-deployment.yaml
-  - networking/alb-ingress-class.yaml
-  - networking/alb-ingress.yaml
-  - storage/s3-secret.yaml
+
+  # Services
+  - service/backend-service.yaml
+  - service/frontend-service.yaml
+
+  # Jobs（数据库初始化）
   - jobs/database-migration.yaml
 
-images:
-  - name: 123456789012.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend
-    newTag: latest
-  - name: 123456789012.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-frontend
-    newTag: latest
+  # Service Accounts
+  - service-accounts/alb-service-account.yaml
+  - service-accounts/backend-service-account.yaml
+  - service-accounts/frontend-service-account.yaml
 
-commonLabels:
-  app: comic
+  # Networking（Ingress）
+  - networking/alb-ing
