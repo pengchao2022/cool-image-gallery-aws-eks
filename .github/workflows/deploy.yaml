@@ -69,10 +69,9 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
-      - name: 🧰 Setup kubectl and helm
+      - name: 🧰 Setup kubectl
         run: |
           sudo snap install kubectl --classic
-          sudo snap install helm --classic
 
       - name: 🧠 Install or Upgrade ALB Ingress Controller
         run: |
@@ -84,7 +83,6 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           OIDC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.identity.oidc.issuer" --output text | cut -d'/' -f5)
 
-          echo "🧾 Creating ALB ServiceAccount YAML..."
           cat <<EOF > alb-serviceaccount.yaml
           apiVersion: v1
           kind: ServiceAccount
@@ -97,7 +95,6 @@ jobs:
 
           kubectl apply -f alb-serviceaccount.yaml
 
-          echo "🧾 Creating Helm values file..."
           cat <<EOF > alb-values.yaml
           clusterName: $CLUSTER_NAME
           region: $AWS_REGION
@@ -107,7 +104,6 @@ jobs:
             name: aws-load-balancer-controller
           EOF
 
-          echo "🔁 Installing or Upgrading ALB Controller..."
           helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
             -n kube-system \
             -f alb-values.yaml \
@@ -135,10 +131,9 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
-      - name: 🧰 Setup kubectl and helm
+      - name: 🧰 Setup kubectl
         run: |
           sudo snap install kubectl --classic
-          sudo snap install helm --classic
 
       - name: 🔍 Get AWS Account ID
         run: |
@@ -195,16 +190,28 @@ jobs:
           kubectl apply -f rds-secret.yaml
           rm rds-secret.yaml
 
-      - name: 🚀 Deploy via Helm
+      # 🚀 使用 kustomize 而不是 Helm 部署
+      - name: 🚀 Deploy using Kustomize
+        env:
+          BACKEND_IMAGE: ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${{ github.sha }}
+          FRONTEND_IMAGE: ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${{ github.sha }}
         run: |
-          helm upgrade --install comic-website ./helm-chart \
-            --namespace ${{ env.NAMESPACE }} \
-            --set image.backend.tag=${GITHUB_SHA:0:8} \
-            --set image.frontend.tag=${GITHUB_SHA:0:8} \
-            --set image.backend.repository=$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend \
-            --set image.frontend.repository=$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend \
-            --wait
+          echo "🔧 Updating image versions in Kubernetes manifests..."
+
+          # 更新后端镜像
+          kubectl set image deployment/backend-deployment \
+            backend-container=$BACKEND_IMAGE \
+            -n ${{ env.NAMESPACE }} --record || true
+
+          # 更新前端镜像
+          kubectl set image deployment/frontend-deployment \
+            frontend-container=$FRONTEND_IMAGE \
+            -n ${{ env.NAMESPACE }} --record || true
+
+          echo "🚀 Applying all manifests using Kustomize..."
+          kubectl apply -k k8s/
 
       - name: 🔍 Verify Deployment
         run: |
-          kubectl get all -n ${{ env.NAMESPACE }}
+          kubectl get pods -n ${{ env.NAMESPACE }}
+          kubectl get svc -n ${{ env.NAMESPACE }}
