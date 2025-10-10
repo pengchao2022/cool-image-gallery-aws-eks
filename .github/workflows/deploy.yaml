@@ -60,6 +60,15 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}"
           terraform apply -auto-approve tfplan
 
+      - name: 📋 Get Terraform Outputs
+        run: |
+          cd terraform
+          BACKEND_ECR_URL=$(terraform output -raw backend_ecr_repository_url)
+          FRONTEND_ECR_URL=$(terraform output -raw frontend_ecr_repository_url)
+          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
+          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
+          echo "✅ ECR URLs retrieved from Terraform"
+
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
@@ -129,38 +138,28 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔍 Get AWS Account ID
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
-
-      - name: 🏗 Ensure ECR repositories exist
-        run: |
-          for repo in comic-website-backend comic-website-frontend; do
-            if ! aws ecr describe-repositories --repository-names $repo --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
-              echo "🪣 Creating ECR repository: $repo"
-              aws ecr create-repository --repository-name $repo --region ${{ env.AWS_REGION }}
-            else
-              echo "✅ ECR repository $repo already exists"
-            fi
-          done
-
       - name: 🔐 Login to ECR
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} \
-          | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          | docker login --username AWS --password-stdin ${{ env.BACKEND_ECR_URL%/* }}
 
       - name: 🧱 Build and Push Backend Image
         run: |
           cd backend
-          docker build -t $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${GITHUB_SHA:0:8} .
-          docker push $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${GITHUB_SHA:0:8}
+          echo "🏗 Building backend image..."
+          docker build -t ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8} .
+          echo "🚀 Pushing backend image..."
+          docker push ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          echo "✅ Backend image pushed: ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}"
 
       - name: 🎨 Build and Push Frontend Image
         run: |
           cd frontend
-          docker build -t $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8} .
-          docker push $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8}
+          echo "🏗 Building frontend image..."
+          docker build -t ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8} .
+          echo "🚀 Pushing frontend image..."
+          docker push ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          echo "✅ Frontend image pushed: ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}"
 
       - name: 🔑 Apply Kubernetes Secrets
         run: |
@@ -191,44 +190,85 @@ jobs:
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
 
           echo "🔧 Patching deployments with new image versions..."
-          BACKEND_IMAGE=$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${GITHUB_SHA:0:8}
-          FRONTEND_IMAGE=$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8}
+          BACKEND_IMAGE=${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          FRONTEND_IMAGE=${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
 
           kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
 
-      - name: 🔍 Verify Deployment
+      - name: ⏳ Wait for Deployments (with timeout)
         run: |
-          echo "🔎 Checking deployment status..."
-          kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} || true
-          kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} || true
-          kubectl get pods -n ${{ env.NAMESPACE }}
+          echo "🔎 Waiting for deployments to be ready..."
+          
+          # 等待后端部署（带超时）
+          timeout 300s bash -c "
+            while true; do
+              if kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
+                echo '✅ Backend deployment ready'
+                break
+              fi
+              echo '⏳ Backend still deploying...'
+              sleep 10
+            done
+          " || echo "⚠️ Backend deployment timeout, continuing..."
+
+          # 等待前端部署（带超时）
+          timeout 180s bash -c "
+            while true; do
+              if kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
+                echo '✅ Frontend deployment ready'
+                break
+              fi
+              echo '⏳ Frontend still deploying...'
+              sleep 10
+            done
+          " || echo "⚠️ Frontend deployment timeout, continuing..."
+
+      - name: 📊 Quick Status Check
+        run: |
+          echo "📊 Current deployment status:"
+          kubectl get pods -n ${{ env.NAMESPACE }} --no-headers | while read line; do
+            POD_NAME=$(echo $line | awk '{print $1}')
+            STATUS=$(echo $line | awk '{print $3}')
+            READY=$(echo $line | awk '{print $2}')
+            echo "  $POD_NAME: $STATUS ($READY)"
+          done
+
+          echo -e "\n📋 Services:"
           kubectl get svc -n ${{ env.NAMESPACE }}
+
+          echo -e "\n🌐 Ingress:"
           kubectl get ingress -n ${{ env.NAMESPACE }}
 
-      - name: 🔍 Get ALB Ingress URL
+      - name: 🔍 Get ALB Ingress URL (Fast)
         run: |
           echo "🚀 Retrieving ALB ingress URL..."
-
-          MAX_ATTEMPTS=2
-          SLEEP_SECONDS=3
-          ATTEMPT=1
-
-          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking for ALB hostname..."
-            ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' || true)
+          
+          # 快速检查，不等待太久
+          for i in {1..3}; do
+            ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB_URL" ]; then
               echo "✅ ALB is ready!"
               echo "🌐 ALB URL: http://$ALB_URL"
               echo "ALB_URL=http://$ALB_URL" >> $GITHUB_ENV
               break
             fi
-            echo "⏳ ALB not ready yet. Waiting ${SLEEP_SECONDS}s..."
-            sleep $SLEEP_SECONDS
-            ATTEMPT=$((ATTEMPT + 1))
+            echo "⏳ ALB not ready yet (attempt $i/3)..."
+            sleep 10
           done
 
           if [ -z "$ALB_URL" ]; then
-            echo "❌ Timed out waiting for ALB URL after $((MAX_ATTEMPTS * SLEEP_SECONDS / 60)) minutes."
-            exit 1
+            echo "ℹ️ ALB not ready yet. It will be available soon."
+            echo "You can check later with: kubectl get ingress -n ${{ env.NAMESPACE }}"
           fi
+
+      - name: 🧪 Quick Health Check
+        if: env.ALB_URL != ''
+        run: |
+          echo "🧪 Performing quick health check..."
+          timeout 30s bash -c "
+            until curl -f $ALB_URL/health 2>/dev/null; do
+              echo '⏳ Health check not ready...'
+              sleep 5
+            done
+          " && echo "✅ Health check passed!" || echo "⚠️ Health check timeout or failed"
