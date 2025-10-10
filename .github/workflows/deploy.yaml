@@ -68,15 +68,27 @@ jobs:
         run: |
           cd terraform
           echo "🔍 Getting Terraform outputs..."
-          # 使用 -json 输出避免格式问题
-          terraform output -json > outputs.json
-          BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value' outputs.json)
-          FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value' outputs.json)
+          
+          # 直接使用 terraform output 命令获取
+          BACKEND_ECR_URL=$(terraform output -raw backend_repository_url)
+          FRONTEND_ECR_URL=$(terraform output -raw frontend_repository_url)
+          
+          echo "Backend ECR URL: $BACKEND_ECR_URL"
+          echo "Frontend ECR URL: $FRONTEND_ECR_URL"
+          
+          if [ -z "$BACKEND_ECR_URL" ] || [ "$BACKEND_ECR_URL" = "null" ]; then
+            echo "❌ Backend ECR URL is empty or null"
+            exit 1
+          fi
+          
+          if [ -z "$FRONTEND_ECR_URL" ] || [ "$FRONTEND_ECR_URL" = "null" ]; then
+            echo "❌ Frontend ECR URL is empty or null"
+            exit 1
+          fi
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
-          echo "✅ Backend ECR: $BACKEND_ECR_URL"
-          echo "✅ Frontend ECR: $FRONTEND_ECR_URL"
+          echo "✅ ECR URLs successfully extracted"
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -127,6 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: terraform-infrastructure
     environment: production
+    if: needs.terraform-infrastructure.result == 'success'
 
     steps:
       - name: 🧩 Checkout code
@@ -154,16 +167,19 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔍 Get AWS Account ID
+      - name: 🔍 Get AWS Account ID and ECR Registry
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+          ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
           echo "✅ AWS Account ID: $ACCOUNT_ID"
+          echo "✅ ECR Registry: $ECR_REGISTRY"
 
       - name: 🔐 Login to ECR
         run: |
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} \
-          | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          echo "Logging into ECR registry: $ECR_REGISTRY"
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
 
       - name: 🔍 Debug ECR URLs
         run: |
@@ -172,12 +188,25 @@ jobs:
           echo "GITHUB_SHA: $GITHUB_SHA"
           echo "GITHUB_SHA shortened: ${GITHUB_SHA:0:8}"
 
+          # 验证 ECR 仓库是否存在
+          if [ -n "$BACKEND_ECR_URL" ]; then
+            REPO_NAME=$(echo $BACKEND_ECR_URL | cut -d'/' -f2)
+            echo "🔍 Checking backend ECR repository: $REPO_NAME"
+            aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ env.AWS_REGION }} && echo "✅ Backend repository exists" || echo "❌ Backend repository not found"
+          fi
+
+          if [ -n "$FRONTEND_ECR_URL" ]; then
+            REPO_NAME=$(echo $FRONTEND_ECR_URL | cut -d'/' -f2)
+            echo "🔍 Checking frontend ECR repository: $REPO_NAME"
+            aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ env.AWS_REGION }} && echo "✅ Frontend repository exists" || echo "❌ Frontend repository not found"
+          fi
+
       - name: 🧱 Build and Push Backend Image
         run: |
           cd backend
           echo "🏗 Building backend image..."
           docker build -t $BACKEND_ECR_URL:${GITHUB_SHA:0:8} .
-          echo "🚀 Pushing backend image..."
+          echo "🚀 Pushing backend image to: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
           docker push $BACKEND_ECR_URL:${GITHUB_SHA:0:8}
           echo "✅ Backend image pushed: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
 
@@ -186,7 +215,7 @@ jobs:
           cd frontend
           echo "🏗 Building frontend image..."
           docker build -t $FRONTEND_ECR_URL:${GITHUB_SHA:0:8} .
-          echo "🚀 Pushing frontend image..."
+          echo "🚀 Pushing frontend image to: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
           docker push $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
           echo "✅ Frontend image pushed: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
 
