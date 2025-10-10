@@ -2,17 +2,17 @@
 FROM node:18-alpine AS build
 WORKDIR /app
 
-# 复制依赖文件并安装
+# 复制依赖文件
 COPY package*.json ./
 RUN npm ci
 
-# 复制所有源代码
+# 复制源码（包括 public）
 COPY . .
 
-# 指定入口文件目录（public/index.html）
-ENV VITE_PUBLIC_DIR=public
+# 把 public/index.html 移动到根目录（Vite 默认入口）
+RUN cp public/index.html ./index.html
 
-# 构建前端产物
+# 构建前端
 RUN npm run build
 
 # ===== Production Stage =====
