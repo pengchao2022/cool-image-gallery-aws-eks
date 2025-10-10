@@ -73,14 +73,10 @@ jobs:
           cd terraform
           echo "🔍 Getting Terraform outputs..."
           
-          # 使用 JSON 方式安全获取所有输出
           terraform output -json > outputs.json
           
-          # ECR URLs
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
-          
-          # RDS 信息
           RDS_ENDPOINT=$(jq -r '.rds_endpoint.value // empty' outputs.json)
           RDS_PORT=$(jq -r '.rds_port.value // "5432"' outputs.json)
           RDS_USERNAME=$(jq -r '.rds_username.value // "comicadmin"' outputs.json)
@@ -93,7 +89,6 @@ jobs:
           echo "RDS Username: $RDS_USERNAME"
           echo "RDS Database: $RDS_DATABASE"
           
-          # 验证关键输出
           if [ -z "$BACKEND_ECR_URL" ]; then
             echo "❌ Backend ECR URL is empty"
             exit 1
@@ -120,15 +115,10 @@ jobs:
       - name: 🔍 Verify RDS Configuration
         run: |
           echo "🔍 Verifying RDS configuration..."
-          
-          # 获取 RDS 详细信息
-          echo "=== RDS Instance Details ==="
           aws rds describe-db-instances \
             --region ${{ env.AWS_REGION }} \
             --query 'DBInstances[].{DBInstanceIdentifier:DBInstanceIdentifier, Status:DBInstanceStatus, Endpoint:Endpoint.Address, Port:Endpoint.Port}' \
             --output table
-          
-          echo "✅ RDS instance is properly configured"
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -137,42 +127,6 @@ jobs:
       - name: 🧰 Setup kubectl
         run: |
           sudo snap install kubectl --classic
-
-      - name: 🧠 Install or Upgrade ALB Ingress Controller
-        run: |
-          set -e
-          helm repo add eks https://aws.github.io/eks-charts
-          helm repo update
-
-          VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.resourcesVpcConfig.vpcId" --output text)
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
-          cat <<EOF > alb-serviceaccount.yaml
-          apiVersion: v1
-          kind: ServiceAccount
-          metadata:
-            name: aws-load-balancer-controller
-            namespace: kube-system
-            annotations:
-              eks.amazonaws.com/role-arn: arn:aws:iam::$ACCOUNT_ID:role/AmazonEKSLoadBalancerControllerRole-$CLUSTER_NAME
-          EOF
-
-          kubectl apply -f alb-serviceaccount.yaml
-
-          cat <<EOF > alb-values.yaml
-          clusterName: $CLUSTER_NAME
-          region: $AWS_REGION
-          vpcId: $VPC_ID
-          serviceAccount:
-            create: false
-            name: aws-load-balancer-controller
-          EOF
-
-          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-            -n kube-system \
-            -f alb-values.yaml \
-            --version 1.6.1 \
-            --wait
 
   build-and-push-images:
     name: "Build and Push Docker Images"
@@ -204,35 +158,25 @@ jobs:
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
           ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
           echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
-          echo "✅ AWS Account ID: $ACCOUNT_ID"
-          echo "✅ ECR Registry: $ECR_REGISTRY"
 
       - name: 🔐 Login to ECR
         run: |
-          echo "Logging into ECR registry: $ECR_REGISTRY"
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
 
       - name: 🔍 Set ECR URLs from previous job
         run: |
           echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
           echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
-          echo "✅ Backend ECR URL: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
-          echo "✅ Frontend ECR URL: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
 
       - name: 🏗 Check if Backend Image Exists
         id: check-backend
         run: |
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          echo "Checking if backend image exists: $BACKEND_IMAGE"
-          
-          # 使用 docker manifest inspect 检查镜像是否存在
           if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
-            echo "✅ Backend image already exists, skipping build"
             echo "image_exists=true" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
           else
-            echo "🚀 Backend image does not exist, will build"
             echo "image_exists=false" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
           fi
@@ -244,14 +188,8 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          
-          echo "🏗 Building backend image..."
           docker build -t $BACKEND_IMAGE .
-          
-          echo "🚀 Pushing backend image..."
           docker push $BACKEND_IMAGE
-          
-          echo "✅ Backend image pushed: $BACKEND_IMAGE"
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
 
       - name: 🎨 Build Frontend Image
@@ -260,28 +198,9 @@ jobs:
           cd frontend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
-          
-          echo "🏗 Building frontend image..."
           docker build -t $FRONTEND_IMAGE .
-          
-          echo "🚀 Pushing frontend image..."
           docker push $FRONTEND_IMAGE
-          
-          echo "✅ Frontend image pushed: $FRONTEND_IMAGE"
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
-
-      - name: 🔍 Verify Built Images
-        run: |
-          echo "🔍 Verifying built images..."
-          echo "Backend Image: ${{ steps.build-backend.outputs.image_tag || steps.check-backend.outputs.image_tag }}"
-          echo "Frontend Image: ${{ steps.build-frontend.outputs.image_tag }}"
-          
-          # 验证后端镜像内容
-          BACKEND_IMAGE="${{ steps.build-backend.outputs.image_tag || steps.check-backend.outputs.image_tag }}"
-          if [ -n "$BACKEND_IMAGE" ]; then
-            echo "=== Backend Image Package.json ==="
-            docker run --rm $BACKEND_IMAGE cat /app/package.json | grep '"start"' || echo "Cannot read package.json"
-          fi
 
   deploy-applications:
     name: "Deploy Applications to EKS"
@@ -303,7 +222,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔍 Set Environment Variables
+      - name: 🔍 Set Deployment Variables
         run: |
           echo "BACKEND_IMAGE=${{ needs.build-and-push-images.outputs.backend_image }}" >> $GITHUB_ENV
           echo "FRONTEND_IMAGE=${{ needs.build-and-push-images.outputs.frontend_image }}" >> $GITHUB_ENV
@@ -312,19 +231,13 @@ jobs:
           echo "RDS_USERNAME=${{ needs.terraform-infrastructure.outputs.rds_username }}" >> $GITHUB_ENV
           echo "RDS_DATABASE=${{ needs.terraform-infrastructure.outputs.rds_database }}" >> $GITHUB_ENV
           
-          echo "✅ Backend Image: ${{ needs.build-and-push-images.outputs.backend_image }}"
-          echo "✅ Frontend Image: ${{ needs.build-and-push-images.outputs.frontend_image }}"
-          echo "✅ RDS Endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          echo "✅ RDS Username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          echo "✅ RDS Database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
-
-      - name: 🔍 Clean RDS Endpoint
-        run: |
-          echo "🔍 Cleaning RDS endpoint..."
+          # 清理 RDS 端点（移除端口部分）
           CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-          echo "Original RDS Endpoint: $RDS_ENDPOINT"
-          echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
           echo "RDS_ENDPOINT=$CLEANED_RDS_ENDPOINT" >> $GITHUB_ENV
+          
+          # 设置前端 URL
+          FRONTEND_URL="http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
+          echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -334,202 +247,279 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🗃 Skip External DB Test - RDS is VPC Internal
-        run: |
-          echo "🔍 RDS Connectivity Information:"
-          echo "================================================"
-          echo "RDS Endpoint: $RDS_ENDPOINT"
-          echo "RDS Port: $RDS_PORT"
-          echo "RDS Database: $RDS_DATABASE"
-          echo "RDS Username: $RDS_USERNAME"
-          echo "RDS Password: *** (from GitHub Secrets)"
-          echo ""
-          echo "⚠️  IMPORTANT: RDS Security Configuration"
-          echo "================================================"
-          echo "✅ RDS instance status: available"
-          echo "✅ Security group allows: 10.0.0.0/16 (VPC internal)"
-          echo "❌ GitHub Actions cannot connect from outside VPC"
-          echo ""
-          echo "🎯 Deployment Strategy:"
-          echo "================================================"
-          echo "1. Skipping external database connectivity test"
-          echo "2. Application pods in EKS will connect from within VPC"
-          echo "3. Database connections will be handled internally"
-          echo "4. Continuing deployment..."
-          echo ""
-          echo "✅ RDS is properly configured for EKS access"
-
-      - name: 🔑 Apply Kubernetes Secrets with GitHub Secrets Password
+      - name: 🗃 Create Namespace
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-          kubectl delete secret rds-secret -n ${{ env.NAMESPACE }} --ignore-not-found=true
-
-          # 直接使用 GitHub Secrets 中的密码
-          cat <<EOF > rds-secret.yaml
-          apiVersion: v1
-          kind: Secret
+      - name: 🚀 Deploy Backend with Environment Variables
+        run: |
+          echo "🚀 Deploying backend with environment variables..."
+          
+          cat <<EOF > backend-deployment.yaml
+          apiVersion: apps/v1
+          kind: Deployment
           metadata:
-            name: rds-secret
+            name: backend-deployment
             namespace: ${{ env.NAMESPACE }}
-          type: Opaque
-          stringData:
-            host: $RDS_ENDPOINT
-            port: '$RDS_PORT'
-            username: $RDS_USERNAME
-            database: $RDS_DATABASE
-            password: '${{ secrets.DB_PASSWORD }}'
+            labels:
+              app: backend
+              app.kubernetes.io/managed-by: github-actions
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: backend
+            template:
+              metadata:
+                labels:
+                  app: backend
+              spec:
+                serviceAccountName: comic-backend-sa
+                containers:
+                - name: backend
+                  image: $BACKEND_IMAGE
+                  ports:
+                  - containerPort: 3000
+                  env:
+                  - name: NODE_ENV
+                    value: "production"
+                  - name: PORT
+                    value: "3000"
+                  - name: FRONTEND_URL
+                    value: "$FRONTEND_URL"
+                  - name: DB_HOST
+                    value: "$RDS_ENDPOINT"
+                  - name: DB_PORT
+                    value: "$RDS_PORT"
+                  - name: DB_NAME
+                    value: "$RDS_DATABASE"
+                  - name: DB_USER
+                    value: "$RDS_USERNAME"
+                  - name: DB_PASSWORD
+                    value: "${{ secrets.DB_PASSWORD }}"
+                  - name: JWT_SECRET
+                    value: "${{ secrets.JWT_SECRET }}"
+                  - name: JWT_EXPIRES_IN
+                    value: "7d"
+                  - name: AWS_REGION
+                    value: "${{ env.AWS_REGION }}"
+                  - name: AWS_ACCESS_KEY_ID
+                    value: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+                  - name: AWS_SECRET_ACCESS_KEY
+                    value: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+                  - name: S3_BUCKET_NAME
+                    value: "${{ secrets.S3_BUCKET_NAME }}"
+                  - name: AWS_STS_REGIONAL_ENDPOINTS
+                    value: "regional"
+                  - name: AWS_ROLE_ARN
+                    value: "arn:aws:iam::123456789012:role/comic-website-prod-app-backend-role"
+                  - name: AWS_WEB_IDENTITY_TOKEN_FILE
+                    value: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"
+                  resources:
+                    requests:
+                      cpu: 200m
+                      memory: 256Mi
+                    limits:
+                      cpu: 500m
+                      memory: 512Mi
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 3000
+                    initialDelaySeconds: 60
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+                  readinessProbe:
+                    httpGet:
+                      path: /health
+                      port: 3000
+                    initialDelaySeconds: 30
+                    periodSeconds: 5
+                    timeoutSeconds: 3
+                    failureThreshold: 1
+                  startupProbe:
+                    httpGet:
+                      path: /health
+                      port: 3000
+                    initialDelaySeconds: 10
+                    periodSeconds: 10
+                    timeoutSeconds: 1
+                    failureThreshold: 30
           EOF
-
-          echo "🔍 RDS Secret content:"
-          echo "Host: $RDS_ENDPOINT"
-          echo "Port: $RDS_PORT"
-          echo "Username: $RDS_USERNAME"
-          echo "Database: $RDS_DATABASE"
-          echo "Password: *** (directly from GitHub Secrets DB_PASSWORD)"
-
-          kubectl apply -f rds-secret.yaml
-          rm rds-secret.yaml
           
-          echo "✅ RDS Secret applied with password from GitHub Secrets"
+          kubectl apply -f backend-deployment.yaml
+          echo "✅ Backend deployment created with environment variables"
 
-      - name: 🔍 Verify RDS Secret
+      - name: 🚀 Deploy Frontend
         run: |
-          echo "🔍 Verifying RDS secret was created correctly..."
-          sleep 5
+          cat <<EOF > frontend-deployment.yaml
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: frontend-deployment
+            namespace: ${{ env.NAMESPACE }}
+            labels:
+              app: frontend
+              app.kubernetes.io/managed-by: github-actions
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: frontend
+            template:
+              metadata:
+                labels:
+                  app: frontend
+              spec:
+                containers:
+                - name: frontend
+                  image: $FRONTEND_IMAGE
+                  ports:
+                  - containerPort: 80
+                  resources:
+                    requests:
+                      cpu: 100m
+                      memory: 128Mi
+                    limits:
+                      cpu: 200m
+                      memory: 256Mi
+          EOF
           
-          # 检查 secret 是否存在
-          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o yaml | grep -v "password:"
-          
-          # 验证密码字段（不显示实际密码）
-          PASSWORD_SET=$(kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data.password}' | base64 -d)
-          if [ -n "$PASSWORD_SET" ]; then
-            echo "✅ RDS password is set (length: ${#PASSWORD_SET} characters)"
-          else
-            echo "❌ RDS password is empty!"
-            exit 1
-          fi
+          kubectl apply -f frontend-deployment.yaml
+          echo "✅ Frontend deployment created"
 
-      - name: 🚀 Deploy using Kustomize
+      - name: 🚀 Deploy Services and Ingress
         run: |
-          echo "🚀 Applying all manifests using Kustomize..."
-          cd k8s
-          kubectl apply -k . --namespace ${{ env.NAMESPACE }}
-
-          echo "🔧 Patching deployments with new image versions..."
-          kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
-          kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
-
-      - name: 🔍 Check Backend Logs for Database Connection
-        run: |
-          echo "🔍 Checking backend pod status and database connection from within EKS..."
-          sleep 60
+          # 创建 backend service
+          cat <<EOF > backend-service.yaml
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: backend-service
+            namespace: ${{ env.NAMESPACE }}
+          spec:
+            selector:
+              app: backend
+            ports:
+            - port: 3000
+              targetPort: 3000
+          EOF
           
-          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+          # 创建 frontend service
+          cat <<EOF > frontend-service.yaml
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: frontend-service
+            namespace: ${{ env.NAMESPACE }}
+          spec:
+            selector:
+              app: frontend
+            ports:
+            - port: 80
+              targetPort: 80
+          EOF
           
-          if [ -n "$BACKEND_POD" ]; then
-            echo "Backend Pod: $BACKEND_POD"
-            echo "=== Pod Status ==="
-            kubectl get pod $BACKEND_POD -n ${{ env.NAMESPACE }} -o wide
-            
-            echo "=== Testing Database Connection from Within EKS Pod ==="
-            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- sh -c "
-              echo 'Testing database connection from within EKS cluster...'
-              if command -v pg_isready >/dev/null 2>&1; then
-                echo 'Using pg_isready to test connection...'
-                pg_isready -h $RDS_ENDPOINT -p $RDS_PORT -t 15
-                if [ \$? -eq 0 ]; then
-                  echo '✅ SUCCESS: Database connection successful from EKS pod'
-                else
-                  echo '❌ FAILED: Database connection failed from EKS pod'
-                fi
-              else
-                echo 'ℹ️ pg_isready not available in pod, checking application connectivity...'
-                if timeout 10 bash -c '</dev/tcp/$RDS_ENDPOINT/$RDS_PORT'; then
-                  echo '✅ SUCCESS: Network connection to database successful'
-                else
-                  echo '❌ FAILED: Network connection to database failed'
-                fi
-              fi
-            " || echo "⚠️ Could not execute command in pod"
-            
-            echo "=== Application Logs ==="
-            kubectl logs $BACKEND_POD -n ${{ env.NAMESPACE }} --tail=100 || true
-            
-          else
-            echo "❌ No backend pod found"
-          fi
+          # 创建 ingress
+          cat <<EOF > ingress.yaml
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: comic-website-ingress
+            namespace: ${{ env.NAMESPACE }}
+            annotations:
+              alb.ingress.kubernetes.io/scheme: internet-facing
+              alb.ingress.kubernetes.io/target-type: ip
+              alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+              alb.ingress.kubernetes.io/ssl-redirect: '443'
+          spec:
+            ingressClassName: alb
+            rules:
+            - http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: frontend-service
+                      port:
+                        number: 80
+                - path: /api
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend-service
+                      port:
+                        number: 3000
+                - path: /health
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend-service
+                      port:
+                        number: 3000
+          EOF
+          
+          kubectl apply -f backend-service.yaml
+          kubectl apply -f frontend-service.yaml
+          kubectl apply -f ingress.yaml
+          echo "✅ Services and ingress created"
 
-      - name: ⏳ Wait for Deployments (with timeout)
+      - name: ⏳ Wait for Deployments
         run: |
           echo "🔎 Waiting for deployments to be ready..."
-          
           timeout 300s bash -c "
-            while true; do
-              if kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
-                echo '✅ Backend deployment ready'
-                break
-              fi
+            while ! kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; do
               echo '⏳ Backend still deploying...'
               sleep 10
             done
           " || echo "⚠️ Backend deployment timeout, continuing..."
 
           timeout 180s bash -c "
-            while true; do
-              if kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
-                echo '✅ Frontend deployment ready'
-                break
-              fi
+            while ! kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; do
               echo '⏳ Frontend still deploying...'
               sleep 10
             done
           " || echo "⚠️ Frontend deployment timeout, continuing..."
 
-      - name: 📊 Quick Status Check
+      - name: 🔍 Verify Deployment
         run: |
-          echo "📊 Current deployment status:"
-          kubectl get pods -n ${{ env.NAMESPACE }} --no-headers | while read line; do
-            POD_NAME=$(echo $line | awk '{print $1}')
-            STATUS=$(echo $line | awk '{print $3}')
-            READY=$(echo $line | awk '{print $2}')
-            echo "  $POD_NAME: $STATUS ($READY)"
-          done
-
+          echo "📊 Deployment status:"
+          kubectl get pods -n ${{ env.NAMESPACE }}
+          
+          echo -e "\n🔍 Backend environment variables:"
+          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$BACKEND_POD" ]; then
+            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- env | grep -E "(DB_|NODE_ENV|PORT)" || echo "Cannot check env vars"
+          fi
+          
           echo -e "\n📋 Services:"
           kubectl get svc -n ${{ env.NAMESPACE }}
-
+          
           echo -e "\n🌐 Ingress:"
           kubectl get ingress -n ${{ env.NAMESPACE }}
 
-      - name: 🔍 Get ALB Ingress URL (Fast)
+      - name: 🔍 Check Application Logs
         run: |
-          echo "🚀 Retrieving ALB ingress URL..."
-          
-          for i in {1..3}; do
+          echo "🔍 Checking backend logs..."
+          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$BACKEND_POD" ]; then
+            kubectl logs $BACKEND_POD -n ${{ env.NAMESPACE }} --tail=50 || true
+          else
+            echo "❌ No backend pod found"
+          fi
+
+      - name: 🌐 Get ALB URL
+        run: |
+          echo "🚀 Retrieving ALB URL..."
+          for i in {1..5}; do
             ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB_URL" ]; then
-              echo "✅ ALB is ready!"
-              echo "🌐 ALB URL: http://$ALB_URL"
+              echo "✅ ALB is ready: http://$ALB_URL"
               echo "ALB_URL=http://$ALB_URL" >> $GITHUB_ENV
               break
             fi
-            echo "⏳ ALB not ready yet (attempt $i/3)..."
+            echo "⏳ ALB not ready yet (attempt $i/5)..."
             sleep 10
           done
-
-          if [ -z "$ALB_URL" ]; then
-            echo "ℹ️ ALB not ready yet. It will be available soon."
-            echo "You can check later with: kubectl get ingress -n ${{ env.NAMESPACE }}"
-          fi
-
-      - name: 🧪 Quick Health Check
-        if: env.ALB_URL != ''
-        run: |
-          echo "🧪 Performing quick health check..."
-          timeout 30s bash -c "
-            until curl -f $ALB_URL/health 2>/dev/null; do
-              echo '⏳ Health check not ready...'
-              sleep 5
-            done
-          " && echo "✅ Health check passed!" || echo "⚠️ Health check timeout or failed"
