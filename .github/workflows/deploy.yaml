@@ -222,18 +222,41 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: 🔍 Debug Job Outputs
+        run: |
+          echo "🔍 Debugging job outputs..."
+          echo "terraform-infrastructure outputs:"
+          echo "  backend_ecr_url: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
+          echo "  frontend_ecr_url: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
+          echo "  rds_endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          echo "  rds_port: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          echo "  rds_username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          echo "  rds_database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          
+          echo "build-and-push-images outputs:"
+          echo "  backend_image: ${{ needs.build-and-push-images.outputs.backend_image }}"
+          echo "  frontend_image: ${{ needs.build-and-push-images.outputs.frontend_image }}"
+
       - name: 🔍 Set Deployment Variables
         run: |
-          echo "BACKEND_IMAGE=${{ needs.build-and-push-images.outputs.backend_image }}" >> $GITHUB_ENV
-          echo "FRONTEND_IMAGE=${{ needs.build-and-push-images.outputs.frontend_image }}" >> $GITHUB_ENV
-          echo "RDS_ENDPOINT=${{ needs.terraform-infrastructure.outputs.rds_endpoint }}" >> $GITHUB_ENV
-          echo "RDS_PORT=${{ needs.terraform-infrastructure.outputs.rds_port }}" >> $GITHUB_ENV
-          echo "RDS_USERNAME=${{ needs.terraform-infrastructure.outputs.rds_username }}" >> $GITHUB_ENV
-          echo "RDS_DATABASE=${{ needs.terraform-infrastructure.outputs.rds_database }}" >> $GITHUB_ENV
+          # 直接从 job 输出设置变量
+          BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
+          FRONTEND_IMAGE="${{ needs.build-and-push-images.outputs.frontend_image }}"
+          RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          
+          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
+          echo "RDS_ENDPOINT=$RDS_ENDPOINT" >> $GITHUB_ENV
+          echo "RDS_PORT=$RDS_PORT" >> $GITHUB_ENV
+          echo "RDS_USERNAME=$RDS_USERNAME" >> $GITHUB_ENV
+          echo "RDS_DATABASE=$RDS_DATABASE" >> $GITHUB_ENV
           
           # 清理 RDS 端点（移除端口部分）
           CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-          echo "RDS_ENDPOINT=$CLEANED_RDS_ENDPOINT" >> $GITHUB_ENV
+          echo "RDS_ENDPOINT_CLEANED=$CLEANED_RDS_ENDPOINT" >> $GITHUB_ENV
           
           # 设置前端 URL
           FRONTEND_URL="http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
@@ -243,6 +266,7 @@ jobs:
           echo "  BACKEND_IMAGE: $BACKEND_IMAGE"
           echo "  FRONTEND_IMAGE: $FRONTEND_IMAGE"
           echo "  RDS_ENDPOINT: $RDS_ENDPOINT"
+          echo "  RDS_ENDPOINT_CLEANED: $CLEANED_RDS_ENDPOINT"
           echo "  RDS_PORT: $RDS_PORT"
           echo "  RDS_USERNAME: $RDS_USERNAME"
           echo "  RDS_DATABASE: $RDS_DATABASE"
@@ -289,15 +313,16 @@ jobs:
       - name: 🎯 Set Backend Environment Variables
         run: |
           echo "🎯 Setting backend environment variables..."
-          echo "RDS_ENDPOINT: $RDS_ENDPOINT"
+          echo "RDS_ENDPOINT_CLEANED: $RDS_ENDPOINT_CLEANED"
           echo "RDS_PORT: $RDS_PORT"
           echo "RDS_DATABASE: $RDS_DATABASE"
           echo "RDS_USERNAME: $RDS_USERNAME"
           echo "DB_PASSWORD length: ${#DB_PASSWORD}"
           
           # 验证关键环境变量
-          if [ -z "$RDS_ENDPOINT" ]; then
-            echo "❌ ERROR: RDS_ENDPOINT is empty"
+          if [ -z "$RDS_ENDPOINT_CLEANED" ]; then
+            echo "❌ ERROR: RDS_ENDPOINT_CLEANED is empty"
+            echo "Original RDS_ENDPOINT: $RDS_ENDPOINT"
             exit 1
           fi
           
@@ -310,7 +335,7 @@ jobs:
           
           # 设置数据库环境变量
           kubectl set env deployment/backend-deployment -n ${{ env.NAMESPACE }} \
-            DB_HOST="$RDS_ENDPOINT" \
+            DB_HOST="$RDS_ENDPOINT_CLEANED" \
             DB_PORT="$RDS_PORT" \
             DB_NAME="$RDS_DATABASE" \
             DB_USER="$RDS_USERNAME" \
