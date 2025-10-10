@@ -32,6 +32,18 @@ export const testConnection = async () => {
     }
 };
 
+// 添加 connectDB 函数（server.js 需要的）
+export const connectDB = async () => {
+  try {
+    await sequelize.authenticate();
+    console.log('✅ PostgreSQL connection has been established successfully.');
+    return true;
+  } catch (error) {
+    console.error('❌ Unable to connect to PostgreSQL:', error);
+    throw error;
+  }
+};
+
 // PostgreSQL query function
 export const query = async (text, params) => {
     try {
