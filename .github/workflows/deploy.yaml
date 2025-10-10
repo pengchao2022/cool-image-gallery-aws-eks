@@ -260,6 +260,13 @@ jobs:
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: 🗑️ Clean Up Problematic Backend Deployment
+        run: |
+          echo "🗑️ Cleaning up problematic backend deployment..."
+          kubectl delete deployment backend-deployment -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          echo "✅ Backend deployment deleted"
+          sleep 5
+
       - name: 🚀 Deploy using Kustomize
         run: |
           echo "🚀 Applying all manifests using Kustomize..."
