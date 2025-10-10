@@ -178,16 +178,22 @@ jobs:
             --version 1.6.1 \
             --wait
 
-  deploy-applications:
-    name: "Deploy Applications to EKS"
+  build-and-push-images:
+    name: "Build and Push Docker Images"
     runs-on: ubuntu-latest
     needs: terraform-infrastructure
     environment: production
     if: needs.terraform-infrastructure.result == 'success'
+    
+    outputs:
+      backend_image: ${{ steps.build-backend.outputs.image_tag }}
+      frontend_image: ${{ steps.build-frontend.outputs.image_tag }}
 
     steps:
       - name: 🧩 Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 🔑 Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -195,44 +201,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: 🔍 Set Environment Variables from previous job
-        run: |
-          echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
-          echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
-          echo "RDS_ENDPOINT=${{ needs.terraform-infrastructure.outputs.rds_endpoint }}" >> $GITHUB_ENV
-          echo "RDS_PORT=${{ needs.terraform-infrastructure.outputs.rds_port }}" >> $GITHUB_ENV
-          echo "RDS_USERNAME=${{ needs.terraform-infrastructure.outputs.rds_username }}" >> $GITHUB_ENV
-          echo "RDS_DATABASE=${{ needs.terraform-infrastructure.outputs.rds_database }}" >> $GITHUB_ENV
-          echo "RDS_PASSWORD=${{ needs.terraform-infrastructure.outputs.rds_password }}" >> $GITHUB_ENV
-          
-          echo "✅ Backend ECR URL: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
-          echo "✅ Frontend ECR URL: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
-          echo "✅ RDS Endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          echo "✅ RDS Port: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          echo "✅ RDS Username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          echo "✅ RDS Database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          echo "✅ RDS Password: ***"
-
-      - name: 🔍 Clean RDS Endpoint
-        run: |
-          echo "🔍 Cleaning RDS endpoint..."
-          # 移除端点中可能包含的端口号
-          CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-          echo "Original RDS Endpoint: $RDS_ENDPOINT"
-          echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
-          echo "RDS_PORT=$RDS_PORT"
-          
-          # 更新环境变量
-          echo "RDS_ENDPOINT=$CLEANED_RDS_ENDPOINT" >> $GITHUB_ENV
-
-      - name: ☸️ Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-
-      - name: 🧰 Setup kubectl
-        run: |
-          sudo snap install kubectl --classic
 
       - name: 🔍 Get AWS Account ID and ECR Registry
         run: |
@@ -248,17 +216,126 @@ jobs:
           echo "Logging into ECR registry: $ECR_REGISTRY"
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-      - name: 🔍 Debug Environment Variables
+      - name: 🔍 Set ECR URLs from previous job
         run: |
-          echo "Backend ECR URL: $BACKEND_ECR_URL"
-          echo "Frontend ECR URL: $FRONTEND_ECR_URL"
-          echo "RDS Endpoint: $RDS_ENDPOINT"
-          echo "RDS Port: $RDS_PORT"
-          echo "RDS Username: $RDS_USERNAME"
-          echo "RDS Database: $RDS_DATABASE"
-          echo "RDS Password: ***"
-          echo "GITHUB_SHA: $GITHUB_SHA"
-          echo "GITHUB_SHA shortened: ${GITHUB_SHA:0:8}"
+          echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
+          echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
+          echo "✅ Backend ECR URL: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
+          echo "✅ Frontend ECR URL: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
+
+      - name: 🏗 Check if Backend Image Exists
+        id: check-backend
+        run: |
+          IMAGE_TAG="${GITHUB_SHA:0:8}"
+          BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
+          echo "Checking if backend image exists: $BACKEND_IMAGE"
+          
+          # 使用 docker manifest inspect 检查镜像是否存在 :cite[7]
+          if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
+            echo "✅ Backend image already exists, skipping build"
+            echo "image_exists=true" >> $GITHUB_OUTPUT
+            echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+          else
+            echo "🚀 Backend image does not exist, will build"
+            echo "image_exists=false" >> $GITHUB_OUTPUT
+            echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🧱 Build Backend Image (if needed)
+        id: build-backend
+        if: steps.check-backend.outputs.image_exists == 'false'
+        run: |
+          cd backend
+          IMAGE_TAG="${GITHUB_SHA:0:8}"
+          BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
+          
+          echo "🏗 Building backend image..."
+          docker build -t $BACKEND_IMAGE .
+          
+          echo "🚀 Pushing backend image..."
+          docker push $BACKEND_IMAGE
+          
+          echo "✅ Backend image pushed: $BACKEND_IMAGE"
+          echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+
+      - name: 🎨 Build Frontend Image
+        id: build-frontend
+        run: |
+          cd frontend
+          IMAGE_TAG="${GITHUB_SHA:0:8}"
+          FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
+          
+          echo "🏗 Building frontend image..."
+          docker build -t $FRONTEND_IMAGE .
+          
+          echo "🚀 Pushing frontend image..."
+          docker push $FRONTEND_IMAGE
+          
+          echo "✅ Frontend image pushed: $FRONTEND_IMAGE"
+          echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+
+      - name: 🔍 Verify Built Images
+        run: |
+          echo "🔍 Verifying built images..."
+          echo "Backend Image: ${{ steps.build-backend.outputs.image_tag || steps.check-backend.outputs.image_tag }}"
+          echo "Frontend Image: ${{ steps.build-frontend.outputs.image_tag }}"
+          
+          # 验证后端镜像内容
+          BACKEND_IMAGE="${{ steps.build-backend.outputs.image_tag || steps.check-backend.outputs.image_tag }}"
+          if [ -n "$BACKEND_IMAGE" ]; then
+            echo "=== Backend Image Package.json ==="
+            docker run --rm $BACKEND_IMAGE cat /app/package.json | grep '"start"' || echo "Cannot read package.json"
+          fi
+
+  deploy-applications:
+    name: "Deploy Applications to EKS"
+    runs-on: ubuntu-latest
+    needs: 
+      - terraform-infrastructure
+      - build-and-push-images
+    environment: production
+    if: needs.terraform-infrastructure.result == 'success'
+
+    steps:
+      - name: 🧩 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔑 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🔍 Set Environment Variables
+        run: |
+          echo "BACKEND_IMAGE=${{ needs.build-and-push-images.outputs.backend_image }}" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE=${{ needs.build-and-push-images.outputs.frontend_image }}" >> $GITHUB_ENV
+          echo "RDS_ENDPOINT=${{ needs.terraform-infrastructure.outputs.rds_endpoint }}" >> $GITHUB_ENV
+          echo "RDS_PORT=${{ needs.terraform-infrastructure.outputs.rds_port }}" >> $GITHUB_ENV
+          echo "RDS_USERNAME=${{ needs.terraform-infrastructure.outputs.rds_username }}" >> $GITHUB_ENV
+          echo "RDS_DATABASE=${{ needs.terraform-infrastructure.outputs.rds_database }}" >> $GITHUB_ENV
+          echo "RDS_PASSWORD=${{ needs.terraform-infrastructure.outputs.rds_password }}" >> $GITHUB_ENV
+          
+          echo "✅ Backend Image: ${{ needs.build-and-push-images.outputs.backend_image }}"
+          echo "✅ Frontend Image: ${{ needs.build-and-push-images.outputs.frontend_image }}"
+          echo "✅ RDS Endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+
+      - name: 🔍 Clean RDS Endpoint
+        run: |
+          echo "🔍 Cleaning RDS endpoint..."
+          CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
+          echo "Original RDS Endpoint: $RDS_ENDPOINT"
+          echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
+          echo "RDS_ENDPOINT=$CLEANED_RDS_ENDPOINT" >> $GITHUB_ENV
+
+      - name: ☸️ Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
+
+      - name: 🧰 Setup kubectl
+        run: |
+          sudo snap install kubectl --classic
 
       - name: 🗃 Skip External DB Test - RDS is VPC Internal
         run: |
@@ -284,29 +361,10 @@ jobs:
           echo ""
           echo "✅ RDS is properly configured for EKS access"
 
-      - name: 🧱 Build and Push Backend Image
-        run: |
-          cd backend
-          echo "🏗 Building backend image..."
-          docker build -t $BACKEND_ECR_URL:${GITHUB_SHA:0:8} .
-          echo "🚀 Pushing backend image to: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
-          docker push $BACKEND_ECR_URL:${GITHUB_SHA:0:8}
-          echo "✅ Backend image pushed: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
-
-      - name: 🎨 Build and Push Frontend Image
-        run: |
-          cd frontend
-          echo "🏗 Building frontend image..."
-          docker build -t $FRONTEND_ECR_URL:${GITHUB_SHA:0:8} .
-          echo "🚀 Pushing frontend image to: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
-          docker push $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
-          echo "✅ Frontend image pushed: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
-
       - name: 🔑 Apply Kubernetes Secrets with Real RDS Info
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-          # 删除旧的 secret（如果存在）
           kubectl delete secret rds-secret -n ${{ env.NAMESPACE }} --ignore-not-found=true
 
           cat <<EOF > rds-secret.yaml
@@ -343,19 +401,14 @@ jobs:
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
 
           echo "🔧 Patching deployments with new image versions..."
-          BACKEND_IMAGE=$BACKEND_ECR_URL:${GITHUB_SHA:0:8}
-          FRONTEND_IMAGE=$FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
-
           kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
 
       - name: 🔍 Check Backend Logs for Database Connection
         run: |
           echo "🔍 Checking backend pod status and database connection from within EKS..."
-          # 等待一下让 pod 启动
           sleep 60
           
-          # 获取最新的 backend pod
           BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
           
           if [ -n "$BACKEND_POD" ]; then
@@ -364,7 +417,6 @@ jobs:
             kubectl get pod $BACKEND_POD -n ${{ env.NAMESPACE }} -o wide
             
             echo "=== Testing Database Connection from Within EKS Pod ==="
-            # 在 pod 内部测试数据库连接（从 EKS 内部）
             kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- sh -c "
               echo 'Testing database connection from within EKS cluster...'
               if command -v pg_isready >/dev/null 2>&1; then
@@ -377,7 +429,6 @@ jobs:
                 fi
               else
                 echo 'ℹ️ pg_isready not available in pod, checking application connectivity...'
-                # 尝试基本的网络连接
                 if timeout 10 bash -c '</dev/tcp/$RDS_ENDPOINT/$RDS_PORT'; then
                   echo '✅ SUCCESS: Network connection to database successful'
                 else
@@ -397,7 +448,6 @@ jobs:
         run: |
           echo "🔎 Waiting for deployments to be ready..."
           
-          # 等待后端部署（带超时）
           timeout 300s bash -c "
             while true; do
               if kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
@@ -409,7 +459,6 @@ jobs:
             done
           " || echo "⚠️ Backend deployment timeout, continuing..."
 
-          # 等待前端部署（带超时）
           timeout 180s bash -c "
             while true; do
               if kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
@@ -441,7 +490,6 @@ jobs:
         run: |
           echo "🚀 Retrieving ALB ingress URL..."
           
-          # 快速检查，不等待太久
           for i in {1..3}; do
             ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB_URL" ]; then
