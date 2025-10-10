@@ -317,23 +317,23 @@ jobs:
           echo "RDS_PORT: $RDS_PORT"
           echo "RDS_DATABASE: $RDS_DATABASE"
           echo "RDS_USERNAME: $RDS_USERNAME"
-          echo "DB_PASSWORD length: ${#DB_PASSWORD}"
+          echo "DB_PASSWORD from secrets: ${{ secrets.DB_PASSWORD != '' && '***SET***' || '***EMPTY***' }}"
           
           # 验证关键环境变量
           if [ -z "$RDS_ENDPOINT_CLEANED" ]; then
             echo "❌ ERROR: RDS_ENDPOINT_CLEANED is empty"
-            echo "Original RDS_ENDPOINT: $RDS_ENDPOINT"
             exit 1
           fi
           
-          if [ -z "$DB_PASSWORD" ]; then
-            echo "❌ ERROR: DB_PASSWORD is empty"
+          if [ -z "${{ secrets.DB_PASSWORD }}" ]; then
+            echo "❌ ERROR: DB_PASSWORD secret is empty"
+            echo "Please check if DB_PASSWORD is set in GitHub Secrets"
             exit 1
           fi
           
           echo "✅ All environment variables are valid"
           
-          # 设置数据库环境变量
+          # 设置数据库环境变量 - 直接使用 GitHub Secrets
           kubectl set env deployment/backend-deployment -n ${{ env.NAMESPACE }} \
             DB_HOST="$RDS_ENDPOINT_CLEANED" \
             DB_PORT="$RDS_PORT" \
