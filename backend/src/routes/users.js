@@ -1,54 +1,46 @@
+import express from 'express';
 import { query } from '../config/database.js';
-import bcrypt from 'bcryptjs';
+import { verifyToken } from '../controllers/authController.js';
 
-export class User {
-  static async create(userData) {
-    const { username, email, password } = userData;
-    
-    const hashedPassword = await bcrypt.hash(password, 12);
-    
-    const result = await query(
-      `INSERT INTO users (username, email, password_hash, created_at, updated_at) 
-       VALUES ($1, $2, $3, NOW(), NOW()) 
-       RETURNING id, username, email, created_at`,
-      [username, email, hashedPassword]
-    );
-    
-    return result.rows[0];
-  }
+const router = express.Router();
 
-  static async findByEmail(email) {
-    const result = await query(
-      'SELECT * FROM users WHERE email = $1',
-      [email]
-    );
-    return result.rows[0];
-  }
+// Get user profile
+router.get('/profile', verifyToken, async (req, res) => {
+    try {
+        // 模拟用户数据
+        const user = {
+            id: req.user.userId,
+            username: 'testuser',
+            email: req.user.email,
+            role: req.user.role
+        };
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch user profile' });
+    }
+});
 
-  static async findById(id) {
-    const result = await query(
-      `SELECT id, username, email, created_at, updated_at 
-       FROM users WHERE id = $1`,
-      [id]
-    );
-    return result.rows[0];
-  }
+// Update user profile
+router.put('/profile', verifyToken, async (req, res) => {
+    try {
+        res.json({ message: 'Profile updated successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
 
-  static async updateProfile(userId, updateData) {
-    const { username } = updateData;
-    
-    const result = await query(
-      `UPDATE users 
-       SET username = $1, updated_at = NOW() 
-       WHERE id = $2 
-       RETURNING id, username, email, created_at, updated_at`,
-      [username, userId]
-    );
-    
-    return result.rows[0];
-  }
+// Get user's favorite comics
+router.get('/favorites', verifyToken, async (req, res) => {
+    try {
+        // 模拟收藏数据
+        const favorites = [
+            { id: 1, title: 'Favorite Comic 1' },
+            { id: 2, title: 'Favorite Comic 2' }
+        ];
+        res.json(favorites);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch favorites' });
+    }
+});
 
-  static async verifyPassword(plainPassword, hashedPassword) {
-    return await bcrypt.compare(plainPassword, hashedPassword);
-  }
-}
+export default router;

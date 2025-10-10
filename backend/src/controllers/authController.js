@@ -1,120 +1,82 @@
+// Auth controller with mock data for PostgreSQL
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { User } from '../models/User.js';
-import { validateRegistration, validateLogin } from '../middleware/validation.js';
+import { mockUsers } from '../models/User.js';
 
-const generateToken = (userId) => {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, { 
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d' 
-  });
-};
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 export const register = async (req, res) => {
-  try {
-    const { username, email, password } = req.body;
-
-    // Check if user already exists
-    const existingUser = await User.findByEmail(email);
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'User already exists with this email'
-      });
+    try {
+        // 这里应该是数据库插入操作
+        // 暂时使用模拟数据
+        res.status(201).json({
+            message: 'User registered successfully',
+            user: { id: 3, username: req.body.username, email: req.body.email }
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Registration failed' });
     }
-
-    // Create new user
-    const user = await User.create({ username, email, password });
-
-    // Generate token
-    const token = generateToken(user.id);
-
-    res.status(201).json({
-      success: true,
-      message: 'User registered successfully',
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email
-      },
-      token
-    });
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
 };
 
 export const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+    try {
+        const { email, password } = req.body;
+        
+        // 模拟用户查找 - 在实际应用中这里应该是数据库查询
+        const user = mockUsers.find(u => u.email === email);
+        
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
 
-    // Find user
-    const user = await User.findByEmail(email);
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password'
-      });
+        // 模拟密码验证
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        
+        if (!isValidPassword) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        const token = jwt.sign(
+            { userId: user.id, email: user.email, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            message: 'Login successful',
+            token,
+            user: user.toJSON()
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Login failed' });
     }
-
-    // Check password
-    const isPasswordValid = await User.verifyPassword(password, user.password_hash);
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password'
-      });
-    }
-
-    // Generate token
-    const token = generateToken(user.id);
-
-    res.json({
-      success: true,
-      message: 'Login successful',
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email
-      },
-      token
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
 };
 
-export const getProfile = async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      user: req.user
-    });
-  } catch (error) {
-    console.error('Get profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
+export const getProfile = (req, res) => {
+    res.json({ user: req.user });
 };
 
-export const verifyToken = async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      user: req.user
-    });
-  } catch (error) {
-    res.status(401).json({
-      success: false,
-      message: 'Invalid token'
-    });
-  }
+// JWT token verification middleware
+export const verifyToken = (req, res, next) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+        return res.status(401).json({ error: 'Access denied. No token provided.' });
+    }
+    
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        req.user = decoded;
+        next();
+    } catch (error) {
+        res.status(401).json({ error: 'Invalid token.' });
+    }
+};
+
+// Admin authorization middleware  
+export const requireAdmin = (req, res, next) => {
+    if (req.user && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required.' });
+    }
+    next();
 };
