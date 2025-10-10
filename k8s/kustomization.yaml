@@ -1,24 +1,22 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# 命名空间（对应你之前创建的 comic-website）
 namespace: comic-website
 
-# 给所有资源统一打标签（推荐）
-labels:
-  - pairs:
-      app.kubernetes.io/part-of: comic-website
-      app.kubernetes.io/managed-by: kustomize
-
-# 按目录结构列出所有资源
 resources:
   # 命名空间
   - namespaces/comic-website.yaml
 
-  # Configs
+  # Service Accounts
+  - service-accounts/alb-service-account.yaml
+  - service-accounts/backend-service-account.yaml
+  - service-accounts/frontend-service-account.yaml
+
+  # Configs & Secrets
   - configs/backend-config.yaml
   - configs/frontend-config.yaml
   - configs/rds-secret.yaml
+  - storage/s3-secret.yaml
 
   # Deployments
   - deployments/backend-deployment.yaml
@@ -28,13 +26,12 @@ resources:
   - service/backend-service.yaml
   - service/frontend-service.yaml
 
-  # Jobs（数据库初始化）
+  # Networking (ALB)
+  - networking/alb-ingress-class.yaml
+  - networking/alb-ingress.yaml
+
+  # Jobs
   - jobs/database-migration.yaml
 
-  # Service Accounts
-  - service-accounts/alb-service-account.yaml
-  - service-accounts/backend-service-account.yaml
-  - service-accounts/frontend-service-account.yaml
-
-  # Networking（Ingress）
-  - networking/alb-ing
+labels:
+  app.kubernetes.io/managed-by: kustomize
