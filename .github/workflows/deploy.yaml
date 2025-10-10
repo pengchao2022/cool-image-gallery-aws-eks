@@ -143,17 +143,16 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔍 Get ECR Registry for Login
+      - name: 🔍 Get AWS Account ID
         run: |
-          # 从 BACKEND_ECR_URL 提取 registry 部分用于登录
-          ECR_REGISTRY=$(echo "${{ env.BACKEND_ECR_URL }}" | cut -d'/' -f1)
-          echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
-          echo "✅ ECR Registry: $ECR_REGISTRY"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+          echo "✅ AWS Account ID: $ACCOUNT_ID"
 
       - name: 🔐 Login to ECR
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} \
-          | docker login --username AWS --password-stdin $ECR_REGISTRY
+          | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
       - name: 🧱 Build and Push Backend Image
         run: |
