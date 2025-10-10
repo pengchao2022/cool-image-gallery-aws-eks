@@ -98,7 +98,7 @@ jobs:
       if: github.ref == 'refs/heads/main'
       uses: azure/setup-helm@v3
       with:
-        version: '3.12.0'  # 指定一个稳定的 Helm 版本
+        version: '3.12.0'
 
     - name: Install ALB Ingress Controller with OIDC
       if: github.ref == 'refs/heads/main'
@@ -115,19 +115,13 @@ jobs:
         
         echo "🔧 Creating ALB Controller ServiceAccount with OIDC..."
         
-        # 使用文件方式创建 ServiceAccount，避免控制字符问题
-        cat > alb-serviceaccount.yaml <<EOF
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: aws-load-balancer-controller
-          namespace: kube-system
-          labels:
-            app.kubernetes.io/name: aws-load-balancer-controller
-            app.kubernetes.io/component: controller
-          annotations:
-            eks.amazonaws.com/role-arn: $ALB_ROLE_ARN
-        EOF
+        # 方法1: 使用 printf 创建干净的 YAML 文件
+        printf 'apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: aws-load-balancer-controller\n  namespace: kube-system\n  labels:\n    app.kubernetes.io/name: aws-load-balancer-controller\n    app.kubernetes.io/component: controller\n  annotations:\n    eks.amazonaws.com/role-arn: %s\n' "$ALB_ROLE_ARN" > alb-serviceaccount.yaml
+        
+        # 验证 YAML 文件
+        echo "=== YAML 文件内容 ==="
+        cat alb-serviceaccount.yaml
+        echo "===================="
         
         # 应用 ServiceAccount
         kubectl apply -f alb-serviceaccount.yaml
@@ -135,15 +129,15 @@ jobs:
         echo "📝 Creating ALB Controller values file..."
         
         # 创建 Helm values 文件
-        cat > alb-values.yaml <<EOF
-        clusterName: ${{ env.CLUSTER_NAME }}
+        cat > alb-values.yaml << 'EOF'
+        clusterName: $CLUSTER_NAME
         serviceAccount:
           create: false
           name: aws-load-balancer-controller
-        region: ${{ env.AWS_REGION }}
+        region: $AWS_REGION
         vpcId: $VPC_ID
         image:
-          repository: 602401143452.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/amazon/aws-load-balancer-controller
+          repository: 602401143452.dkr.ecr.$AWS_REGION.amazonaws.com/amazon/aws-load-balancer-controller
         replicaCount: 2
         resources:
           requests:
@@ -153,6 +147,11 @@ jobs:
             cpu: 500m
             memory: 512Mi
         EOF
+        
+        # 替换变量
+        sed -i "s/\$CLUSTER_NAME/$CLUSTER_NAME/g" alb-values.yaml
+        sed -i "s/\$AWS_REGION/$AWS_REGION/g" alb-values.yaml
+        sed -i "s/\$VPC_ID/$VPC_ID/g" alb-values.yaml
         
         echo "🚀 Installing AWS Load Balancer Controller..."
         
@@ -167,7 +166,7 @@ jobs:
           --wait
         
         echo "⏳ Waiting for ALB Controller pods to be ready..."
-        sleep 30  # 给 Pod 一些启动时间
+        sleep 30
         
         # 等待 Pod 就绪
         kubectl wait --for=condition=ready pod \
@@ -260,35 +259,10 @@ jobs:
         # 创建命名空间（如果不存在）
         kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
         
-        # 使用文件方式创建 Secret，避免控制字符问题
-        cat > rds-secret.yaml <<EOF
-        apiVersion: v1
-        kind: Secret
-        metadata:
-          name: rds-secret
-          namespace: ${{ env.NAMESPACE }}
-        type: Opaque
-        stringData:
-          host: "$DB_HOST"
-          port: "5432"
-          username: "comicadmin"
-          database: "comicdb"
-          password: "${{ secrets.DB_PASSWORD }}"
-        EOF
+        # 使用 printf 创建干净的 Secret 文件
+        printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: rds-secret\n  namespace: %s\ntype: Opaque\nstringData:\n  host: "%s"\n  port: "5432"\n  username: "comicadmin"\n  database: "comicdb"\n  password: "%s"\n' "$NAMESPACE" "$DB_HOST" "${{ secrets.DB_PASSWORD }}" > rds-secret.yaml
         
-        cat > backend-secrets.yaml <<EOF
-        apiVersion: v1
-        kind: Secret
-        metadata:
-          name: backend-secrets
-          namespace: ${{ env.NAMESPACE }}
-        type: Opaque
-        stringData:
-          JWT_SECRET: "${{ secrets.JWT_SECRET || 'default-jwt-secret-change-in-production' }}"
-          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-          S3_BUCKET_NAME: "$S3_BUCKET_NAME"
-        EOF
+        printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: backend-secrets\n  namespace: %s\ntype: Opaque\nstringData:\n  JWT_SECRET: "%s"\n  AWS_ACCESS_KEY_ID: "%s"\n  AWS_SECRET_ACCESS_KEY: "%s"\n  S3_BUCKET_NAME: "%s"\n' "$NAMESPACE" "${{ secrets.JWT_SECRET || 'default-jwt-secret-change-in-production' }}" "${{ secrets.AWS_ACCESS_KEY_ID }}" "${{ secrets.AWS_SECRET_ACCESS_KEY }}" "$S3_BUCKET_NAME" > backend-secrets.yaml
         
         kubectl apply -f rds-secret.yaml
         kubectl apply -f backend-secrets.yaml
