@@ -53,7 +53,7 @@ output "rds_port" {
 output "rds_username" {
   description = "RDS master username"
   value       = module.rds.db_username
-  sensitive   = false
+  sensitive   = true
 }
 
 output "rds_database_name" {
@@ -65,5 +65,5 @@ output "rds_database_name" {
 output "rds_password" {
   description = "RDS master password"
   value       = module.rds.db_password
-  sensitive   = false
+  sensitive   = true
 }
