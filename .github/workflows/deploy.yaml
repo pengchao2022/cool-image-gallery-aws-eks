@@ -194,8 +194,8 @@ jobs:
           BACKEND_IMAGE=$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${GITHUB_SHA:0:8}
           FRONTEND_IMAGE=$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8}
 
-          kubectl set image deployment/backend-deployment backend-container=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
-          kubectl set image deployment/frontend-deployment frontend-container=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
+          kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
+          kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
 
       - name: 🔍 Verify Deployment
         run: |
@@ -205,3 +205,10 @@ jobs:
           kubectl get pods -n ${{ env.NAMESPACE }}
           kubectl get svc -n ${{ env.NAMESPACE }}
           kubectl get ingress -n ${{ env.NAMESPACE }}
+
+      - name: 🔍 Get ALB Ingress URL
+        run: |
+          echo "🚀 Retrieving ALB ingress URL..."
+          ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "ALB URL: $ALB_URL"
+          echo "ALB_URL=$ALB_URL" >> $GITHUB_ENV
