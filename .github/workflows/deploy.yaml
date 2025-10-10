@@ -18,6 +18,9 @@ jobs:
     name: "Terraform - Create Infrastructure"
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      backend_ecr_url: ${{ steps.terraform-outputs.outputs.backend_ecr_url }}
+      frontend_ecr_url: ${{ steps.terraform-outputs.outputs.frontend_ecr_url }}
 
     steps:
       - name: 🧩 Checkout code
@@ -61,6 +64,7 @@ jobs:
           terraform apply -auto-approve tfplan
 
       - name: 📋 Get Terraform Outputs
+        id: terraform-outputs
         run: |
           cd terraform
           echo "🔍 Getting Terraform outputs..."
@@ -69,8 +73,8 @@ jobs:
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value' outputs.json)
           
-          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
-          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
+          echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
+          echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "✅ Backend ECR: $BACKEND_ECR_URL"
           echo "✅ Frontend ECR: $FRONTEND_ECR_URL"
 
@@ -135,6 +139,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: 🔍 Set ECR URLs from previous job
+        run: |
+          echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
+          echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
+          echo "✅ Backend ECR URL: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
+          echo "✅ Frontend ECR URL: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
+
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
@@ -154,23 +165,30 @@ jobs:
           aws ecr get-login-password --region ${{ env.AWS_REGION }} \
           | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
+      - name: 🔍 Debug ECR URLs
+        run: |
+          echo "Backend ECR URL: $BACKEND_ECR_URL"
+          echo "Frontend ECR URL: $FRONTEND_ECR_URL"
+          echo "GITHUB_SHA: $GITHUB_SHA"
+          echo "GITHUB_SHA shortened: ${GITHUB_SHA:0:8}"
+
       - name: 🧱 Build and Push Backend Image
         run: |
           cd backend
           echo "🏗 Building backend image..."
-          docker build -t ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8} .
+          docker build -t $BACKEND_ECR_URL:${GITHUB_SHA:0:8} .
           echo "🚀 Pushing backend image..."
-          docker push ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
-          echo "✅ Backend image pushed: ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}"
+          docker push $BACKEND_ECR_URL:${GITHUB_SHA:0:8}
+          echo "✅ Backend image pushed: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
 
       - name: 🎨 Build and Push Frontend Image
         run: |
           cd frontend
           echo "🏗 Building frontend image..."
-          docker build -t ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8} .
+          docker build -t $FRONTEND_ECR_URL:${GITHUB_SHA:0:8} .
           echo "🚀 Pushing frontend image..."
-          docker push ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
-          echo "✅ Frontend image pushed: ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}"
+          docker push $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
+          echo "✅ Frontend image pushed: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
 
       - name: 🔑 Apply Kubernetes Secrets
         run: |
@@ -201,8 +219,8 @@ jobs:
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
 
           echo "🔧 Patching deployments with new image versions..."
-          BACKEND_IMAGE=${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
-          FRONTEND_IMAGE=${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          BACKEND_IMAGE=$BACKEND_ECR_URL:${GITHUB_SHA:0:8}
+          FRONTEND_IMAGE=$FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
 
           kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
