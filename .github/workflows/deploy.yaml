@@ -209,6 +209,26 @@ jobs:
       - name: 🔍 Get ALB Ingress URL
         run: |
           echo "🚀 Retrieving ALB ingress URL..."
-          ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "ALB URL: $ALB_URL"
-          echo "ALB_URL=$ALB_URL" >> $GITHUB_ENV
+
+          MAX_ATTEMPTS=30
+          SLEEP_SECONDS=20
+          ATTEMPT=1
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking for ALB hostname..."
+            ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' || true)
+            if [ -n "$ALB_URL" ]; then
+              echo "✅ ALB is ready!"
+              echo "🌐 ALB URL: http://$ALB_URL"
+              echo "ALB_URL=http://$ALB_URL" >> $GITHUB_ENV
+              break
+            fi
+            echo "⏳ ALB not ready yet. Waiting ${SLEEP_SECONDS}s..."
+            sleep $SLEEP_SECONDS
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ -z "$ALB_URL" ]; then
+            echo "❌ Timed out waiting for ALB URL after $((MAX_ATTEMPTS * SLEEP_SECONDS / 60)) minutes."
+            exit 1
+          fi
