@@ -63,11 +63,26 @@ jobs:
       - name: 📋 Get Terraform Outputs
         run: |
           cd terraform
-          BACKEND_ECR_URL=$(terraform output -raw backend_ecr_repository_url)
-          FRONTEND_ECR_URL=$(terraform output -raw frontend_ecr_repository_url)
+          echo "🔍 Checking Terraform outputs..."
+          
+          # 检查是否有输出
+          terraform output || echo "No outputs found"
+          
+          # 尝试获取 ECR URLs，如果失败则使用默认值
+          BACKEND_ECR_URL=$(terraform output -raw backend_ecr_repository_url 2>/dev/null || echo "")
+          FRONTEND_ECR_URL=$(terraform output -raw frontend_ecr_repository_url 2>/dev/null || echo "")
+          
+          if [ -z "$BACKEND_ECR_URL" ]; then
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            BACKEND_ECR_URL="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend"
+            FRONTEND_ECR_URL="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend"
+            echo "⚠️ Using default ECR URLs"
+          fi
+          
           echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
           echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
-          echo "✅ ECR URLs retrieved from Terraform"
+          echo "✅ Backend ECR: $BACKEND_ECR_URL"
+          echo "✅ Frontend ECR: $FRONTEND_ECR_URL"
 
       - name: ☸️ Update kubeconfig
         run: |
