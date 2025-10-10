@@ -251,220 +251,45 @@ jobs:
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: 🚀 Deploy Backend with Environment Variables
+      - name: 🚀 Deploy using Kustomize
         run: |
-          echo "🚀 Deploying backend with environment variables..."
-          
-          cat <<EOF > backend-deployment.yaml
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: backend-deployment
-            namespace: ${{ env.NAMESPACE }}
-            labels:
-              app: backend
-              app.kubernetes.io/managed-by: github-actions
-          spec:
-            replicas: 2
-            selector:
-              matchLabels:
-                app: backend
-            template:
-              metadata:
-                labels:
-                  app: backend
-              spec:
-                serviceAccountName: comic-backend-sa
-                containers:
-                - name: backend
-                  image: $BACKEND_IMAGE
-                  ports:
-                  - containerPort: 3000
-                  env:
-                  - name: NODE_ENV
-                    value: "production"
-                  - name: PORT
-                    value: "3000"
-                  - name: FRONTEND_URL
-                    value: "$FRONTEND_URL"
-                  - name: DB_HOST
-                    value: "$RDS_ENDPOINT"
-                  - name: DB_PORT
-                    value: "$RDS_PORT"
-                  - name: DB_NAME
-                    value: "$RDS_DATABASE"
-                  - name: DB_USER
-                    value: "$RDS_USERNAME"
-                  - name: DB_PASSWORD
-                    value: "${{ secrets.DB_PASSWORD }}"
-                  - name: JWT_SECRET
-                    value: "${{ secrets.JWT_SECRET }}"
-                  - name: JWT_EXPIRES_IN
-                    value: "7d"
-                  - name: AWS_REGION
-                    value: "${{ env.AWS_REGION }}"
-                  - name: AWS_ACCESS_KEY_ID
-                    value: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-                  - name: AWS_SECRET_ACCESS_KEY
-                    value: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-                  - name: S3_BUCKET_NAME
-                    value: "${{ secrets.S3_BUCKET_NAME }}"
-                  - name: AWS_STS_REGIONAL_ENDPOINTS
-                    value: "regional"
-                  - name: AWS_ROLE_ARN
-                    value: "arn:aws:iam::123456789012:role/comic-website-prod-app-backend-role"
-                  - name: AWS_WEB_IDENTITY_TOKEN_FILE
-                    value: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"
-                  resources:
-                    requests:
-                      cpu: 200m
-                      memory: 256Mi
-                    limits:
-                      cpu: 500m
-                      memory: 512Mi
-                  livenessProbe:
-                    httpGet:
-                      path: /health
-                      port: 3000
-                    initialDelaySeconds: 60
-                    periodSeconds: 10
-                    timeoutSeconds: 5
-                    failureThreshold: 3
-                  readinessProbe:
-                    httpGet:
-                      path: /health
-                      port: 3000
-                    initialDelaySeconds: 30
-                    periodSeconds: 5
-                    timeoutSeconds: 3
-                    failureThreshold: 1
-                  startupProbe:
-                    httpGet:
-                      path: /health
-                      port: 3000
-                    initialDelaySeconds: 10
-                    periodSeconds: 10
-                    timeoutSeconds: 1
-                    failureThreshold: 30
-          EOF
-          
-          kubectl apply -f backend-deployment.yaml
-          echo "✅ Backend deployment created with environment variables"
+          echo "🚀 Applying all manifests using Kustomize..."
+          cd k8s
+          kubectl apply -k . --namespace ${{ env.NAMESPACE }}
 
-      - name: 🚀 Deploy Frontend
+      - name: 🔄 Update Backend Image
         run: |
-          cat <<EOF > frontend-deployment.yaml
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: frontend-deployment
-            namespace: ${{ env.NAMESPACE }}
-            labels:
-              app: frontend
-              app.kubernetes.io/managed-by: github-actions
-          spec:
-            replicas: 2
-            selector:
-              matchLabels:
-                app: frontend
-            template:
-              metadata:
-                labels:
-                  app: frontend
-              spec:
-                containers:
-                - name: frontend
-                  image: $FRONTEND_IMAGE
-                  ports:
-                  - containerPort: 80
-                  resources:
-                    requests:
-                      cpu: 100m
-                      memory: 128Mi
-                    limits:
-                      cpu: 200m
-                      memory: 256Mi
-          EOF
-          
-          kubectl apply -f frontend-deployment.yaml
-          echo "✅ Frontend deployment created"
+          echo "🔄 Updating backend image..."
+          kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }}
+          echo "✅ Backend image updated to: $BACKEND_IMAGE"
 
-      - name: 🚀 Deploy Services and Ingress
+      - name: 🔄 Update Frontend Image
         run: |
-          # 创建 backend service
-          cat <<EOF > backend-service.yaml
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: backend-service
-            namespace: ${{ env.NAMESPACE }}
-          spec:
-            selector:
-              app: backend
-            ports:
-            - port: 3000
-              targetPort: 3000
-          EOF
+          echo "🔄 Updating frontend image..."
+          kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }}
+          echo "✅ Frontend image updated to: $FRONTEND_IMAGE"
+
+      - name: 🎯 Update Backend Environment Variables
+        run: |
+          echo "🎯 Updating backend environment variables..."
           
-          # 创建 frontend service
-          cat <<EOF > frontend-service.yaml
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: frontend-service
-            namespace: ${{ env.NAMESPACE }}
-          spec:
-            selector:
-              app: frontend
-            ports:
-            - port: 80
-              targetPort: 80
-          EOF
+          kubectl set env deployment/backend-deployment -n ${{ env.NAMESPACE }} \
+            NODE_ENV=production \
+            PORT=3000 \
+            FRONTEND_URL="$FRONTEND_URL" \
+            DB_HOST="$RDS_ENDPOINT" \
+            DB_PORT="$RDS_PORT" \
+            DB_NAME="$RDS_DATABASE" \
+            DB_USER="$RDS_USERNAME" \
+            DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+            JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            JWT_EXPIRES_IN="7d" \
+            AWS_REGION="${{ env.AWS_REGION }}" \
+            AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
           
-          # 创建 ingress
-          cat <<EOF > ingress.yaml
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: comic-website-ingress
-            namespace: ${{ env.NAMESPACE }}
-            annotations:
-              alb.ingress.kubernetes.io/scheme: internet-facing
-              alb.ingress.kubernetes.io/target-type: ip
-              alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-              alb.ingress.kubernetes.io/ssl-redirect: '443'
-          spec:
-            ingressClassName: alb
-            rules:
-            - http:
-                paths:
-                - path: /
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: frontend-service
-                      port:
-                        number: 80
-                - path: /api
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: backend-service
-                      port:
-                        number: 3000
-                - path: /health
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: backend-service
-                      port:
-                        number: 3000
-          EOF
-          
-          kubectl apply -f backend-service.yaml
-          kubectl apply -f frontend-service.yaml
-          kubectl apply -f ingress.yaml
-          echo "✅ Services and ingress created"
+          echo "✅ Backend environment variables updated"
 
       - name: ⏳ Wait for Deployments
         run: |
