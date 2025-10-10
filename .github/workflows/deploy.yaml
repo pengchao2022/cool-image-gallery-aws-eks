@@ -20,22 +20,22 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout code
+      - name: 🧩 Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: 🔑 Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
+      - name: 🏗 Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
 
-      - name: Terraform Init
+      - name: ⚙️ Terraform Init
         run: |
           cd terraform
           terraform init \
@@ -45,12 +45,12 @@ jobs:
             -backend-config="encrypt=true" \
             -backend-config="dynamodb_table=comic-website-tfstate-lock"
 
-      - name: Terraform Validate
+      - name: ✅ Terraform Validate
         run: |
           cd terraform
           terraform validate
 
-      - name: Terraform Plan and Apply
+      - name: 🚀 Terraform Plan and Apply
         run: |
           cd terraform
           terraform plan -out=tfplan \
@@ -60,53 +60,68 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}"
           terraform apply -auto-approve tfplan
 
-      - name: Get AWS Account ID
+      - name: 🔍 Get AWS Account ID
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
 
-      - name: Update kubeconfig
+      - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
-      - name: Setup kubectl and helm
+      - name: 🧰 Setup kubectl and helm
         run: |
           sudo snap install kubectl --classic
           sudo snap install helm --classic
 
-      - name: Install ALB Ingress Controller
+      - name: 🧠 Install or Upgrade ALB Ingress Controller
         run: |
+          set -e
           helm repo add eks https://aws.github.io/eks-charts
           helm repo update
+
           VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.resourcesVpcConfig.vpcId" --output text)
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           OIDC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.identity.oidc.issuer" --output text | cut -d'/' -f5)
 
-          echo "Creating ALB ServiceAccount YAML..."
-          printf "%s\n" \
-            "apiVersion: v1" \
-            "kind: ServiceAccount" \
-            "metadata:" \
-            "  name: aws-load-balancer-controller" \
-            "  namespace: kube-system" \
-            "  annotations:" \
-            "    eks.amazonaws.com/role-arn: arn:aws:iam::$ACCOUNT_ID:role/AmazonEKSLoadBalancerControllerRole-$CLUSTER_NAME" \
-            > alb-serviceaccount.yaml
+          echo "🧾 Creating ALB ServiceAccount YAML..."
+          cat <<EOF > alb-serviceaccount.yaml
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: aws-load-balancer-controller
+            namespace: kube-system
+            annotations:
+              eks.amazonaws.com/role-arn: arn:aws:iam::$ACCOUNT_ID:role/AmazonEKSLoadBalancerControllerRole-$CLUSTER_NAME
+          EOF
 
           kubectl apply -f alb-serviceaccount.yaml
 
-          echo "Creating Helm values file..."
-          printf "%s\n" \
-            "clusterName: $CLUSTER_NAME" \
-            "region: $AWS_REGION" \
-            "vpcId: $VPC_ID" \
-            "serviceAccount:" \
-            "  create: false" \
-            "  name: aws-load-balancer-controller" \
-            > alb-values.yaml
+          echo "🧾 Creating Helm values file..."
+          cat <<EOF > alb-values.yaml
+          clusterName: $CLUSTER_NAME
+          region: $AWS_REGION
+          vpcId: $VPC_ID
+          serviceAccount:
+            create: false
+            name: aws-load-balancer-controller
+          EOF
 
-          helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
-            -n kube-system -f alb-values.yaml --version 1.6.1 --wait
+          if helm status aws-load-balancer-controller -n kube-system > /dev/null 2>&1; then
+            echo "🔁 Updating existing AWS Load Balancer Controller..."
+            helm upgrade aws-load-balancer-controller eks/aws-load-balancer-controller \
+              -n kube-system \
+              -f alb-values.yaml \
+              --version 1.6.1 \
+              --wait
+          else
+            echo "🚀 Installing new AWS Load Balancer Controller..."
+            helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+              -n kube-system \
+              -f alb-values.yaml \
+              --version 1.6.1 \
+              --wait
+          fi
 
   deploy-applications:
     name: "Deploy Applications to EKS"
@@ -115,36 +130,36 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout code
+      - name: 🧩 Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: 🔑 Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Update kubeconfig
+      - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
-      - name: Setup kubectl and helm
+      - name: 🧰 Setup kubectl and helm
         run: |
           sudo snap install kubectl --classic
           sudo snap install helm --classic
 
-      - name: Get AWS Account ID
+      - name: 🔍 Get AWS Account ID
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
 
-      - name: Login to ECR
+      - name: 🔐 Login to ECR
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} \
           | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-      - name: Build and Push Docker Images
+      - name: 🏗 Build and Push Docker Images
         run: |
           cd backend
           docker build -t $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${GITHUB_SHA:0:8} .
@@ -153,29 +168,29 @@ jobs:
           docker build -t $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8} .
           docker push $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8}
 
-      - name: Apply Kubernetes Secrets
+      - name: 🔑 Apply Kubernetes Secrets
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-          printf "%s\n" \
-            "apiVersion: v1" \
-            "kind: Secret" \
-            "metadata:" \
-            "  name: rds-secret" \
-            "  namespace: ${{ env.NAMESPACE }}" \
-            "type: Opaque" \
-            "stringData:" \
-            "  host: localhost" \
-            "  port: '5432'" \
-            "  username: comicadmin" \
-            "  database: comicdb" \
-            "  password: ${{ secrets.DB_PASSWORD }}" \
-            > rds-secret.yaml
+          cat <<EOF > rds-secret.yaml
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: rds-secret
+            namespace: ${{ env.NAMESPACE }}
+          type: Opaque
+          stringData:
+            host: localhost
+            port: '5432'
+            username: comicadmin
+            database: comicdb
+            password: ${{ secrets.DB_PASSWORD }}
+          EOF
 
           kubectl apply -f rds-secret.yaml
           rm rds-secret.yaml
 
-      - name: Deploy Kubernetes Manifests
+      - name: 🚀 Deploy Kubernetes Manifests
         run: |
           if [ -d "k8s-manifests" ]; then
             kubectl apply -k k8s-manifests/
@@ -183,11 +198,11 @@ jobs:
             echo "⚠️ No k8s-manifests directory found"
           fi
 
-      - name: Wait for Deployments
+      - name: ⏳ Wait for Deployments
         run: |
           kubectl wait --for=condition=available --timeout=600s deployment/backend-deployment -n ${{ env.NAMESPACE }} || true
           kubectl wait --for=condition=available --timeout=600s deployment/frontend-deployment -n ${{ env.NAMESPACE }} || true
 
-      - name: Verify Deployment
+      - name: 🔍 Verify Deployment
         run: |
           kubectl get all -n ${{ env.NAMESPACE }}
