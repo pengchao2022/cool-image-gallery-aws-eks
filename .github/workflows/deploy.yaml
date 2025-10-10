@@ -24,8 +24,7 @@ jobs:
       rds_endpoint: ${{ steps.terraform-outputs.outputs.rds_endpoint }}
       rds_port: ${{ steps.terraform-outputs.outputs.rds_port }}
       rds_username: ${{ steps.terraform-outputs.outputs.rds_username }}
-      rds_database: ${{ steps.terraform-infrastructure.outputs.rds_database }}
-      rds_password: ${{ steps.terraform-outputs.outputs.rds_password }}
+      rds_database: ${{ steps.terraform-outputs.outputs.rds_database }}
 
     steps:
       - name: 🧩 Checkout code
@@ -81,20 +80,18 @@ jobs:
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
           
-          # RDS 信息 - 使用正确的输出键名
+          # RDS 信息
           RDS_ENDPOINT=$(jq -r '.rds_endpoint.value // empty' outputs.json)
           RDS_PORT=$(jq -r '.rds_port.value // "5432"' outputs.json)
           RDS_USERNAME=$(jq -r '.rds_username.value // "comicadmin"' outputs.json)
           RDS_DATABASE=$(jq -r '.rds_database_name.value // "comicdb"' outputs.json)
-          RDS_PASSWORD=$(jq -r '.rds_password.value // empty' outputs.json)
           
           echo "Backend ECR URL: $BACKEND_ECR_URL"
           echo "Frontend ECR URL: $FRONTEND_ECR_URL"
           echo "RDS Endpoint: $RDS_ENDPOINT"
           echo "RDS Port: $RDS_PORT"
-          echo "RDS Username: ***"
+          echo "RDS Username: $RDS_USERNAME"
           echo "RDS Database: $RDS_DATABASE"
-          echo "RDS Password: *** (length: ${#RDS_PASSWORD})"
           
           # 验证关键输出
           if [ -z "$BACKEND_ECR_URL" ]; then
@@ -111,11 +108,6 @@ jobs:
             echo "❌ RDS Endpoint is empty"
             exit 1
           fi
-
-          if [ -z "$RDS_PASSWORD" ]; then
-            echo "❌ RDS Password is empty - this will cause database connection failures"
-            exit 1
-          fi
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
@@ -123,7 +115,6 @@ jobs:
           echo "rds_port=$RDS_PORT" >> $GITHUB_OUTPUT
           echo "rds_username=$RDS_USERNAME" >> $GITHUB_OUTPUT
           echo "rds_database=$RDS_DATABASE" >> $GITHUB_OUTPUT
-          echo "rds_password=$RDS_PASSWORD" >> $GITHUB_OUTPUT
           echo "✅ All outputs extracted successfully"
 
       - name: 🔍 Verify RDS Configuration
@@ -320,12 +311,12 @@ jobs:
           echo "RDS_PORT=${{ needs.terraform-infrastructure.outputs.rds_port }}" >> $GITHUB_ENV
           echo "RDS_USERNAME=${{ needs.terraform-infrastructure.outputs.rds_username }}" >> $GITHUB_ENV
           echo "RDS_DATABASE=${{ needs.terraform-infrastructure.outputs.rds_database }}" >> $GITHUB_ENV
-          echo "RDS_PASSWORD=${{ needs.terraform-infrastructure.outputs.rds_password }}" >> $GITHUB_ENV
           
           echo "✅ Backend Image: ${{ needs.build-and-push-images.outputs.backend_image }}"
           echo "✅ Frontend Image: ${{ needs.build-and-push-images.outputs.frontend_image }}"
           echo "✅ RDS Endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          echo "✅ RDS Password: *** (length: ${#RDS_PASSWORD})"
+          echo "✅ RDS Username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          echo "✅ RDS Database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
 
       - name: 🔍 Clean RDS Endpoint
         run: |
@@ -351,7 +342,7 @@ jobs:
           echo "RDS Port: $RDS_PORT"
           echo "RDS Database: $RDS_DATABASE"
           echo "RDS Username: $RDS_USERNAME"
-          echo "RDS Password: *** (set from Terraform output)"
+          echo "RDS Password: *** (from GitHub Secrets)"
           echo ""
           echo "⚠️  IMPORTANT: RDS Security Configuration"
           echo "================================================"
@@ -368,12 +359,13 @@ jobs:
           echo ""
           echo "✅ RDS is properly configured for EKS access"
 
-      - name: 🔑 Apply Kubernetes Secrets with Real RDS Info
+      - name: 🔑 Apply Kubernetes Secrets with GitHub Secrets Password
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
           kubectl delete secret rds-secret -n ${{ env.NAMESPACE }} --ignore-not-found=true
 
+          # 直接使用 GitHub Secrets 中的密码
           cat <<EOF > rds-secret.yaml
           apiVersion: v1
           kind: Secret
@@ -386,7 +378,7 @@ jobs:
             port: '$RDS_PORT'
             username: $RDS_USERNAME
             database: $RDS_DATABASE
-            password: '$RDS_PASSWORD'
+            password: '${{ secrets.DB_PASSWORD }}'
           EOF
 
           echo "🔍 RDS Secret content:"
@@ -394,12 +386,12 @@ jobs:
           echo "Port: $RDS_PORT"
           echo "Username: $RDS_USERNAME"
           echo "Database: $RDS_DATABASE"
-          echo "Password: *** (from Terraform output)"
+          echo "Password: *** (directly from GitHub Secrets DB_PASSWORD)"
 
           kubectl apply -f rds-secret.yaml
           rm rds-secret.yaml
           
-          echo "✅ RDS Secret applied with real connection info"
+          echo "✅ RDS Secret applied with password from GitHub Secrets"
 
       - name: 🔍 Verify RDS Secret
         run: |
@@ -407,7 +399,7 @@ jobs:
           sleep 5
           
           # 检查 secret 是否存在
-          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o yaml
+          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o yaml | grep -v "password:"
           
           # 验证密码字段（不显示实际密码）
           PASSWORD_SET=$(kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data.password}' | base64 -d)
