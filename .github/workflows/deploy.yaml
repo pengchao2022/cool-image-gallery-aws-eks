@@ -76,9 +76,12 @@ jobs:
           
           # 使用 JSON 方式安全获取所有输出
           terraform output -json > outputs.json
-          cat outputs.json
           
-          # ECR URLs
+          # 调试：显示所有输出键名
+          echo "=== Available Output Keys ==="
+          jq -r 'keys[]' outputs.json
+          
+          # ECR URLs - 使用正确的输出名称
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
           
@@ -93,20 +96,24 @@ jobs:
           echo "Frontend ECR URL: $FRONTEND_ECR_URL"
           echo "RDS Endpoint: $RDS_ENDPOINT"
           echo "RDS Port: $RDS_PORT"
-          echo "RDS Username: $RDS_USERNAME"
+          echo "RDS Username: ***"
           echo "RDS Database: $RDS_DATABASE"
-          echo "RDS Password: ***"  # 不显示实际密码
+          echo "RDS Password: ***"
           
-          # 如果 RDS 输出为空，使用默认值
-          if [ -z "$RDS_ENDPOINT" ]; then
-            echo "⚠️ RDS Endpoint is empty, using fallback values"
-            RDS_ENDPOINT="localhost"
+          # 验证关键输出
+          if [ -z "$BACKEND_ECR_URL" ]; then
+            echo "❌ Backend ECR URL is empty"
+            exit 1
           fi
           
-          # 如果从 Terraform 获取不到密码，使用 GitHub Secrets 中的密码
-          if [ -z "$RDS_PASSWORD" ]; then
-            echo "⚠️ RDS Password not found in Terraform outputs, using GitHub secret"
-            RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
+          if [ -z "$FRONTEND_ECR_URL" ]; then
+            echo "❌ Frontend ECR URL is empty"
+            exit 1
+          fi
+          
+          if [ -z "$RDS_ENDPOINT" ]; then
+            echo "❌ RDS Endpoint is empty"
+            exit 1
           fi
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
@@ -117,15 +124,6 @@ jobs:
           echo "rds_database=$RDS_DATABASE" >> $GITHUB_OUTPUT
           echo "rds_password=$RDS_PASSWORD" >> $GITHUB_OUTPUT
           echo "✅ All outputs extracted successfully"
-
-      - name: 🔍 Verify RDS Instance
-        run: |
-          echo "🔍 Verifying RDS instance..."
-          # 获取 RDS 实例状态
-          aws rds describe-db-instances \
-            --region ${{ env.AWS_REGION }} \
-            --query 'DBInstances[].{DBInstanceIdentifier:DBInstanceIdentifier, Endpoint:Endpoint.Address, Port:Endpoint.Port, Status:DBInstanceStatus}' \
-            --output table
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -205,7 +203,29 @@ jobs:
           echo "✅ RDS Port: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
           echo "✅ RDS Username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
           echo "✅ RDS Database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          echo "✅ RDS Password: ***"  # 不显示实际密码
+          echo "✅ RDS Password: ***"
+
+      - name: 🔍 Verify RDS Connection Info
+        run: |
+          echo "🔍 Verifying RDS connection information..."
+          echo "RDS Endpoint: $RDS_ENDPOINT"
+          echo "RDS Port: $RDS_PORT"
+          echo "RDS Username: $RDS_USERNAME"
+          echo "RDS Database: $RDS_DATABASE"
+          
+          # 验证端点格式
+          if [[ "$RDS_ENDPOINT" == *"localhost"* ]] || [[ "$RDS_ENDPOINT" == *"127.0.0.1"* ]]; then
+            echo "❌ ERROR: RDS Endpoint contains localhost!"
+            echo "This indicates the Terraform output is not being passed correctly."
+            exit 1
+          fi
+          
+          if [ -z "$RDS_ENDPOINT" ]; then
+            echo "❌ ERROR: RDS Endpoint is empty!"
+            exit 1
+          fi
+          
+          echo "✅ RDS connection info looks correct"
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -237,22 +257,9 @@ jobs:
           echo "RDS Port: $RDS_PORT"
           echo "RDS Username: $RDS_USERNAME"
           echo "RDS Database: $RDS_DATABASE"
-          echo "RDS Password: ***"  # 不显示实际密码
+          echo "RDS Password: ***"
           echo "GITHUB_SHA: $GITHUB_SHA"
           echo "GITHUB_SHA shortened: ${GITHUB_SHA:0:8}"
-
-          # 验证 ECR 仓库是否存在
-          if [ -n "$BACKEND_ECR_URL" ]; then
-            REPO_NAME=$(echo $BACKEND_ECR_URL | cut -d'/' -f2)
-            echo "🔍 Checking backend ECR repository: $REPO_NAME"
-            aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ env.AWS_REGION }} && echo "✅ Backend repository exists" || echo "❌ Backend repository not found"
-          fi
-
-          if [ -n "$FRONTEND_ECR_URL" ]; then
-            REPO_NAME=$(echo $FRONTEND_ECR_URL | cut -d'/' -f2)
-            echo "🔍 Checking frontend ECR repository: $REPO_NAME"
-            aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ env.AWS_REGION }} && echo "✅ Frontend repository exists" || echo "❌ Frontend repository not found"
-          fi
 
       - name: 🗃 Test Database Connection
         run: |
@@ -329,7 +336,7 @@ jobs:
           echo "Port: $RDS_PORT"
           echo "Username: $RDS_USERNAME"
           echo "Database: $RDS_DATABASE"
-          echo "Password: ***"  # 不显示实际密码
+          echo "Password: ***"
 
           kubectl apply -f rds-secret.yaml
           rm rds-secret.yaml
