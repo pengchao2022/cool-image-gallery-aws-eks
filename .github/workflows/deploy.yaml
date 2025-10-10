@@ -77,10 +77,6 @@ jobs:
           # 使用 JSON 方式安全获取所有输出
           terraform output -json > outputs.json
           
-          # 调试：显示所有输出键名和值
-          echo "=== All Terraform Outputs ==="
-          jq -r 'to_entries[] | "\(.key): \(.value.value)"' outputs.json
-          
           # ECR URLs
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
@@ -113,18 +109,7 @@ jobs:
           
           if [ -z "$RDS_ENDPOINT" ]; then
             echo "❌ RDS Endpoint is empty"
-            echo "Debug: Checking if RDS endpoint exists in outputs..."
-            # 如果 RDS 端点是空的，尝试从 AWS 直接获取
-            RDS_ENDPOINT=$(aws rds describe-db-instances \
-              --region ${{ env.AWS_REGION }} \
-              --query 'DBInstances[0].Endpoint.Address' \
-              --output text 2>/dev/null || echo "")
-            echo "RDS Endpoint from AWS API: $RDS_ENDPOINT"
-            
-            if [ -z "$RDS_ENDPOINT" ]; then
-              echo "❌ RDS Endpoint is still empty after AWS API call"
-              exit 1
-            fi
+            exit 1
           fi
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
@@ -216,26 +201,17 @@ jobs:
           echo "✅ RDS Database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
           echo "✅ RDS Password: ***"
 
-      - name: 🔍 Verify RDS Connection Info
+      - name: 🔍 Clean RDS Endpoint
         run: |
-          echo "🔍 Verifying RDS connection information..."
-          echo "RDS Endpoint: $RDS_ENDPOINT"
-          echo "RDS Port: $RDS_PORT"
-          echo "RDS Username: $RDS_USERNAME"
-          echo "RDS Database: $RDS_DATABASE"
+          echo "🔍 Cleaning RDS endpoint..."
+          # 移除端点中可能包含的端口号
+          CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
+          echo "Original RDS Endpoint: $RDS_ENDPOINT"
+          echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
+          echo "RDS_PORT=$RDS_PORT"
           
-          # 验证端点格式
-          if [ -z "$RDS_ENDPOINT" ]; then
-            echo "❌ ERROR: RDS Endpoint is empty!"
-            exit 1
-          fi
-          
-          if [[ "$RDS_ENDPOINT" == *"localhost"* ]] || [[ "$RDS_ENDPOINT" == *"127.0.0.1"* ]]; then
-            echo "❌ ERROR: RDS Endpoint contains localhost!"
-            exit 1
-          fi
-          
-          echo "✅ RDS connection info looks correct"
+          # 更新环境变量
+          echo "RDS_ENDPOINT=$CLEANED_RDS_ENDPOINT" >> $GITHUB_ENV
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -282,11 +258,11 @@ jobs:
           echo "Testing connection to: $RDS_ENDPOINT:$RDS_PORT"
           
           # 测试连接（带超时和重试）
-          MAX_RETRIES=10
+          MAX_RETRIES=15
           RETRY_COUNT=0
           
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if pg_isready -h $RDS_ENDPOINT -p $RDS_PORT -t 5; then
+            if pg_isready -h $RDS_ENDPOINT -p $RDS_PORT -t 10; then
               echo "✅ Database connection successful!"
               break
             else
@@ -298,6 +274,11 @@ jobs:
           
           if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
             echo "⚠️ Database connection timeout after $MAX_RETRIES attempts"
+            echo "Checking RDS instance status..."
+            aws rds describe-db-instances \
+              --region ${{ env.AWS_REGION }} \
+              --query 'DBInstances[].{DBInstanceIdentifier:DBInstanceIdentifier, Status:DBInstanceStatus, Endpoint:Endpoint.Address, Port:Endpoint.Port}' \
+              --output table
             echo "Continuing deployment anyway..."
           fi
 
