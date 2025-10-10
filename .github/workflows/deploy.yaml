@@ -1,208 +1,67 @@
-name: Deploy Comic Website
+name: 🚀 Deploy Backend to AWS EKS
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
 
 env:
   AWS_REGION: us-east-1
-  CLUSTER_NAME: comic-website-prod
-  PROJECT_NAME: comic-website
-  ENVIRONMENT: prod
-  NAMESPACE: comic-website
-  TF_BACKEND_BUCKET: comic-website-tfstate-2024
+  ECR_REPOSITORY: comic-website-backend
+  CLUSTER_NAME: comic-cluster
 
 jobs:
-  terraform-infrastructure:
-    name: "Terraform - Create Infrastructure"
+  deploy:
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
-      - name: 🧩 Checkout code
+      - name: 🧩 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🔑 Configure AWS credentials
+      - name: ⚙️ Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🏗 Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.5.0
-
-      - name: ⚙️ Terraform Init
+      # --- Debug Step: 检查 AWS 凭证与 ECR 仓库 ---
+      - name: 🔍 Debug AWS Identity & ECR Check
         run: |
-          cd terraform
-          terraform init \
-            -backend-config="bucket=${{ env.TF_BACKEND_BUCKET }}" \
-            -backend-config="key=terraform/state/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
-            -backend-config="encrypt=true" \
-            -backend-config="dynamodb_table=comic-website-tfstate-lock"
-
-      - name: ✅ Terraform Validate
-        run: |
-          cd terraform
-          terraform validate
-
-      - name: 🚀 Terraform Plan and Apply
-        run: |
-          cd terraform
-          terraform plan -out=tfplan \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=${{ env.PROJECT_NAME }}" \
-            -var="environment=${{ env.ENVIRONMENT }}" \
-            -var="db_password=${{ secrets.DB_PASSWORD }}"
-          terraform apply -auto-approve tfplan
+          echo "🔹 Checking AWS identity..."
+          aws sts get-caller-identity
+          echo "🔹 Checking ECR repository..."
+          aws ecr describe-repositories \
+            --repository-names ${{ env.ECR_REPOSITORY }} \
+            --region ${{ env.AWS_REGION }} || echo "⚠️ Repository not found or access denied!"
 
       - name: 🔍 Get AWS Account ID
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
 
-      - name: ☸️ Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-
-      - name: 🧰 Setup kubectl and helm
-        run: |
-          sudo snap install kubectl --classic
-          sudo snap install helm --classic
-
-      - name: 🧠 Install or Upgrade ALB Ingress Controller
-        run: |
-          set -e
-          helm repo add eks https://aws.github.io/eks-charts
-          helm repo update
-
-          VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.resourcesVpcConfig.vpcId" --output text)
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          OIDC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.identity.oidc.issuer" --output text | cut -d'/' -f5)
-
-          echo "🧾 Creating ALB ServiceAccount YAML..."
-          cat <<EOF > alb-serviceaccount.yaml
-          apiVersion: v1
-          kind: ServiceAccount
-          metadata:
-            name: aws-load-balancer-controller
-            namespace: kube-system
-            annotations:
-              eks.amazonaws.com/role-arn: arn:aws:iam::$ACCOUNT_ID:role/AmazonEKSLoadBalancerControllerRole-$CLUSTER_NAME
-          EOF
-
-          kubectl apply -f alb-serviceaccount.yaml
-
-          echo "🧾 Creating Helm values file..."
-          cat <<EOF > alb-values.yaml
-          clusterName: $CLUSTER_NAME
-          region: $AWS_REGION
-          vpcId: $VPC_ID
-          serviceAccount:
-            create: false
-            name: aws-load-balancer-controller
-          EOF
-
-          if helm status aws-load-balancer-controller -n kube-system > /dev/null 2>&1; then
-            echo "🔁 Updating existing AWS Load Balancer Controller..."
-            helm upgrade aws-load-balancer-controller eks/aws-load-balancer-controller \
-              -n kube-system \
-              -f alb-values.yaml \
-              --version 1.6.1 \
-              --wait
-          else
-            echo "🚀 Installing new AWS Load Balancer Controller..."
-            helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
-              -n kube-system \
-              -f alb-values.yaml \
-              --version 1.6.1 \
-              --wait
-          fi
-
-  deploy-applications:
-    name: "Deploy Applications to EKS"
-    runs-on: ubuntu-latest
-    needs: terraform-infrastructure
-    environment: production
-
-    steps:
-      - name: 🧩 Checkout code
-        uses: actions/checkout@v4
-
-      - name: 🔑 Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: ☸️ Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-
-      - name: 🧰 Setup kubectl and helm
-        run: |
-          sudo snap install kubectl --classic
-          sudo snap install helm --classic
-
-      - name: 🔍 Get AWS Account ID
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
-
-      - name: 🔐 Login to ECR
+      - name: 🔐 Login to Amazon ECR
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} \
-          | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          | docker login --username AWS \
+            --password-stdin https://${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-      - name: 🏗 Build and Push Docker Images
+      - name: 🛠 Build Docker image
         run: |
-          cd backend
-          docker build -t $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${GITHUB_SHA:0:8} .
-          docker push $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-backend:${GITHUB_SHA:0:8}
-          cd ../frontend
-          docker build -t $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8} .
-          docker push $ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/comic-website-frontend:${GITHUB_SHA:0:8}
+          docker build -t ${{ env.ECR_REPOSITORY }} .
+          docker tag ${{ env.ECR_REPOSITORY }}:latest \
+            ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-      - name: 🔑 Apply Kubernetes Secrets
+      - name: 📦 Push image to ECR
         run: |
-          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          docker push ${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
-          cat <<EOF > rds-secret.yaml
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: rds-secret
-            namespace: ${{ env.NAMESPACE }}
-          type: Opaque
-          stringData:
-            host: localhost
-            port: '5432'
-            username: comicadmin
-            database: comicdb
-            password: ${{ secrets.DB_PASSWORD }}
-          EOF
-
-          kubectl apply -f rds-secret.yaml
-          rm rds-secret.yaml
-
-      - name: 🚀 Deploy Kubernetes Manifests
+      - name: ⚙️ Update kubeconfig
         run: |
-          if [ -d "k8s-manifests" ]; then
-            kubectl apply -k k8s-manifests/
-          else
-            echo "⚠️ No k8s-manifests directory found"
-          fi
+          aws eks update-kubeconfig --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
-      - name: ⏳ Wait for Deployments
+      - name: 🚀 Deploy to EKS
         run: |
-          kubectl wait --for=condition=available --timeout=600s deployment/backend-deployment -n ${{ env.NAMESPACE }} || true
-          kubectl wait --for=condition=available --timeout=600s deployment/frontend-deployment -n ${{ env.NAMESPACE }} || true
-
-      - name: 🔍 Verify Deployment
-        run: |
-          kubectl get all -n ${{ env.NAMESPACE }}
+          kubectl set image deployment/${{ env.ECR_REPOSITORY }} \
+            ${{ env.ECR_REPOSITORY }}=${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          kubectl rollout status deployment/${{ env.ECR_REPOSITORY }}
