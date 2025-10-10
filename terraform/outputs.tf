@@ -61,9 +61,31 @@ output "rds_database_name" {
   value       = module.rds.db_name
 }
 
-# 添加密码输出
+# 密码输出
 output "rds_password" {
   description = "RDS master password"
   value       = module.rds.db_password
   sensitive   = true
 }
+
+# OIDC 和 ALB Controller 相关输出
+output "cluster_oidc_issuer_url" {
+  description = "EKS cluster OIDC issuer URL"
+  value       = module.eks.cluster_oidc_issuer_url
+}
+
+output "oidc_provider_arn" {
+  description = "OIDC provider ARN"
+  value       = module.eks.oidc_provider_arn
+}
+
+output "alb_controller_role_arn" {
+  description = "ALB Controller IAM role ARN"
+  value       = module.eks.alb_controller_role_arn
+}
+
+output "cluster_certificate_authority_data" {
+  description = "EKS cluster certificate authority data"
+  value       = module.eks.cluster_certificate_authority_data
+}
+

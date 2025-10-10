@@ -20,8 +20,7 @@ eks_cluster_version = "1.28"
 
 # RDS 配置
 db_instance_class = "db.t3.micro"
-database_name     = "comicdb"
-db_username       = "comicadmin"
+
 
 # S3 配置
 s3_versioning_enabled = true
