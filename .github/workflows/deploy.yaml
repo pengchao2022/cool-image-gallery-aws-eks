@@ -77,20 +77,20 @@ jobs:
           # 使用 JSON 方式安全获取所有输出
           terraform output -json > outputs.json
           
-          # 调试：显示所有输出键名
-          echo "=== Available Output Keys ==="
-          jq -r 'keys[]' outputs.json
+          # 调试：显示所有输出键名和值
+          echo "=== All Terraform Outputs ==="
+          jq -r 'to_entries[] | "\(.key): \(.value.value)"' outputs.json
           
-          # ECR URLs - 使用正确的输出名称
+          # ECR URLs
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
           
-          # RDS 信息 - 使用你的实际输出名称
-          RDS_ENDPOINT=$(jq -r '.db_endpoint.value // empty' outputs.json)
-          RDS_PORT=$(jq -r '.db_port.value // "5432"' outputs.json)
-          RDS_USERNAME=$(jq -r '.db_username.value // "comicadmin"' outputs.json)
-          RDS_DATABASE=$(jq -r '.db_name.value // "comicdb"' outputs.json)
-          RDS_PASSWORD=$(jq -r '.db_password.value // empty' outputs.json)
+          # RDS 信息 - 使用正确的输出键名
+          RDS_ENDPOINT=$(jq -r '.rds_endpoint.value // empty' outputs.json)
+          RDS_PORT=$(jq -r '.rds_port.value // "5432"' outputs.json)
+          RDS_USERNAME=$(jq -r '.rds_username.value // "comicadmin"' outputs.json)
+          RDS_DATABASE=$(jq -r '.rds_database_name.value // "comicdb"' outputs.json)
+          RDS_PASSWORD=$(jq -r '.rds_password.value // empty' outputs.json)
           
           echo "Backend ECR URL: $BACKEND_ECR_URL"
           echo "Frontend ECR URL: $FRONTEND_ECR_URL"
@@ -113,7 +113,18 @@ jobs:
           
           if [ -z "$RDS_ENDPOINT" ]; then
             echo "❌ RDS Endpoint is empty"
-            exit 1
+            echo "Debug: Checking if RDS endpoint exists in outputs..."
+            # 如果 RDS 端点是空的，尝试从 AWS 直接获取
+            RDS_ENDPOINT=$(aws rds describe-db-instances \
+              --region ${{ env.AWS_REGION }} \
+              --query 'DBInstances[0].Endpoint.Address' \
+              --output text 2>/dev/null || echo "")
+            echo "RDS Endpoint from AWS API: $RDS_ENDPOINT"
+            
+            if [ -z "$RDS_ENDPOINT" ]; then
+              echo "❌ RDS Endpoint is still empty after AWS API call"
+              exit 1
+            fi
           fi
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
@@ -214,14 +225,13 @@ jobs:
           echo "RDS Database: $RDS_DATABASE"
           
           # 验证端点格式
-          if [[ "$RDS_ENDPOINT" == *"localhost"* ]] || [[ "$RDS_ENDPOINT" == *"127.0.0.1"* ]]; then
-            echo "❌ ERROR: RDS Endpoint contains localhost!"
-            echo "This indicates the Terraform output is not being passed correctly."
+          if [ -z "$RDS_ENDPOINT" ]; then
+            echo "❌ ERROR: RDS Endpoint is empty!"
             exit 1
           fi
           
-          if [ -z "$RDS_ENDPOINT" ]; then
-            echo "❌ ERROR: RDS Endpoint is empty!"
+          if [[ "$RDS_ENDPOINT" == *"localhost"* ]] || [[ "$RDS_ENDPOINT" == *"127.0.0.1"* ]]; then
+            echo "❌ ERROR: RDS Endpoint contains localhost!"
             exit 1
           fi
           
