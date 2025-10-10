@@ -18,11 +18,11 @@ resource "aws_security_group" "rds" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    cidr_blocks     = [var.vpc_cidr]
-    description     = "Allow PostgreSQL access from VPC"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+    description = "Allow PostgreSQL access from VPC"
   }
 
   egress {
@@ -45,38 +45,37 @@ resource "aws_db_instance" "main" {
   identifier = "${var.project_name}-${var.environment}-db"
 
   # Database Configuration
-  engine               = "postgres"
-  engine_version       = "14.12"
-  instance_class       = var.instance_class
-  allocated_storage    = var.allocated_storage
+  engine                = "postgres"
+  engine_version        = "14.12"
+  instance_class        = var.instance_class
+  allocated_storage     = var.allocated_storage
   max_allocated_storage = var.max_allocated_storage
-  storage_type         = "gp2"
-  
+  storage_type          = "gp2"
+
   # Database Credentials
   db_name  = var.database_name
   username = var.username
   password = var.password
   port     = 5432
-  
+
   # Network Configuration
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
   multi_az               = var.multi_az
-  
+
   # Maintenance & Backup
-  backup_retention_period = var.backup_retention_period
-  backup_window           = "03:00-04:00"
-  maintenance_window      = "sun:04:00-sun:05:00"
-  skip_final_snapshot     = var.skip_final_snapshot
+  backup_retention_period   = var.backup_retention_period
+  backup_window             = "03:00-04:00"
+  maintenance_window        = "sun:04:00-sun:05:00"
+  skip_final_snapshot       = var.skip_final_snapshot
   final_snapshot_identifier = var.final_snapshot_identifier
-  
+
   # Performance & Monitoring
   performance_insights_enabled          = var.performance_insights_enabled
   performance_insights_retention_period = var.performance_insights_enabled ? 7 : null
   monitoring_interval                   = var.monitoring_interval
-  monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
-  
+
   # Database Settings
   parameter_group_name = aws_db_parameter_group.main.name
   deletion_protection  = var.deletion_protection
@@ -140,12 +139,16 @@ resource "aws_iam_role" "rds_monitoring" {
     ]
   })
 
-  managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"]
-
   tags = merge(
     var.common_tags,
     {
       Name = "${var.project_name}-${var.environment}-rds-monitoring-role"
     }
   )
+}
+
+# Attach RDS Enhanced Monitoring policy using the non-deprecated method
+resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
+  role       = aws_iam_role.rds_monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }

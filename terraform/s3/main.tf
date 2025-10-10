@@ -55,6 +55,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "comic_storage" {
 }
 
 # Lifecycle Configuration
+# Lifecycle Configuration
 resource "aws_s3_bucket_lifecycle_configuration" "comic_storage" {
   bucket = aws_s3_bucket.comic_storage.id
 
@@ -65,6 +66,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "comic_storage" {
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
     }
+
+    # 添加必需的 filter
+    filter {
+      prefix = ""
+    }
   }
 
   rule {
@@ -73,6 +79,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "comic_storage" {
 
     noncurrent_version_expiration {
       noncurrent_days = var.noncurrent_version_expiration_days
+    }
+
+    # 添加必需的 filter
+    filter {
+      prefix = ""
     }
   }
 
@@ -85,6 +96,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "comic_storage" {
       transition {
         storage_class = "INTELLIGENT_TIERING"
         days          = 0
+      }
+
+      # 添加必需的 filter
+      filter {
+        prefix = ""
       }
     }
   }
