@@ -33,5 +33,5 @@ resources:
   # Jobs
   - jobs/database-migration.yaml
 
-labels:
+commonLabels:
   app.kubernetes.io/managed-by: kustomize
