@@ -60,6 +60,20 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}"
           terraform apply -auto-approve tfplan
 
+      - name: 📋 Get Terraform Outputs
+        run: |
+          cd terraform
+          echo "🔍 Getting Terraform outputs..."
+          # 使用 -json 输出避免格式问题
+          terraform output -json > outputs.json
+          BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value' outputs.json)
+          FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value' outputs.json)
+          
+          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
+          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
+          echo "✅ Backend ECR: $BACKEND_ECR_URL"
+          echo "✅ Frontend ECR: $FRONTEND_ECR_URL"
+
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
@@ -129,19 +143,12 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔍 Get AWS Account ID and ECR URLs
+      - name: 🔍 Get ECR Registry for Login
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
-          ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
-          BACKEND_ECR_URL="$ECR_REGISTRY/comic-website-backend"
-          FRONTEND_ECR_URL="$ECR_REGISTRY/comic-website-frontend"
+          # 从 BACKEND_ECR_URL 提取 registry 部分用于登录
+          ECR_REGISTRY=$(echo "${{ env.BACKEND_ECR_URL }}" | cut -d'/' -f1)
           echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
-          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
-          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
           echo "✅ ECR Registry: $ECR_REGISTRY"
-          echo "✅ Backend ECR: $BACKEND_ECR_URL"
-          echo "✅ Frontend ECR: $FRONTEND_ECR_URL"
 
       - name: 🔐 Login to ECR
         run: |
@@ -152,19 +159,19 @@ jobs:
         run: |
           cd backend
           echo "🏗 Building backend image..."
-          docker build -t $BACKEND_ECR_URL:${GITHUB_SHA:0:8} .
+          docker build -t ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8} .
           echo "🚀 Pushing backend image..."
-          docker push $BACKEND_ECR_URL:${GITHUB_SHA:0:8}
-          echo "✅ Backend image pushed: $BACKEND_ECR_URL:${GITHUB_SHA:0:8}"
+          docker push ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          echo "✅ Backend image pushed: ${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}"
 
       - name: 🎨 Build and Push Frontend Image
         run: |
           cd frontend
           echo "🏗 Building frontend image..."
-          docker build -t $FRONTEND_ECR_URL:${GITHUB_SHA:0:8} .
+          docker build -t ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8} .
           echo "🚀 Pushing frontend image..."
-          docker push $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
-          echo "✅ Frontend image pushed: $FRONTEND_ECR_URL:${GITHUB_SHA:0:8}"
+          docker push ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          echo "✅ Frontend image pushed: ${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}"
 
       - name: 🔑 Apply Kubernetes Secrets
         run: |
@@ -195,8 +202,8 @@ jobs:
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
 
           echo "🔧 Patching deployments with new image versions..."
-          BACKEND_IMAGE=$BACKEND_ECR_URL:${GITHUB_SHA:0:8}
-          FRONTEND_IMAGE=$FRONTEND_ECR_URL:${GITHUB_SHA:0:8}
+          BACKEND_IMAGE=${{ env.BACKEND_ECR_URL }}:${GITHUB_SHA:0:8}
+          FRONTEND_IMAGE=${{ env.FRONTEND_ECR_URL }}:${GITHUB_SHA:0:8}
 
           kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }} || true
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }} || true
