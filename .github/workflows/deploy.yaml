@@ -94,9 +94,11 @@ jobs:
       if: github.ref == 'refs/heads/main'
       uses: azure/setup-kubectl@v3
       
-    - name: Setup Helm
+    - name: Setup Helm with specific version
       if: github.ref == 'refs/heads/main'
       uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'  # 指定一个稳定的 Helm 版本
 
     - name: Install ALB Ingress Controller with OIDC
       if: github.ref == 'refs/heads/main'
@@ -113,8 +115,8 @@ jobs:
         
         echo "🔧 Creating ALB Controller ServiceAccount with OIDC..."
         
-        # 创建 ServiceAccount 使用 OIDC - 修复 YAML 格式问题
-        cat <<EOF | kubectl apply -f -
+        # 使用文件方式创建 ServiceAccount，避免控制字符问题
+        cat > alb-serviceaccount.yaml <<EOF
         apiVersion: v1
         kind: ServiceAccount
         metadata:
@@ -126,6 +128,9 @@ jobs:
           annotations:
             eks.amazonaws.com/role-arn: $ALB_ROLE_ARN
         EOF
+        
+        # 应用 ServiceAccount
+        kubectl apply -f alb-serviceaccount.yaml
         
         echo "📝 Creating ALB Controller values file..."
         
@@ -150,16 +155,30 @@ jobs:
         EOF
         
         echo "🚀 Installing AWS Load Balancer Controller..."
-        helm upgrade -i aws-load-balancer-controller eks/aws-load-balancer-controller \
+        
+        # 先卸载可能存在的旧版本
+        helm uninstall aws-load-balancer-controller -n kube-system 2>/dev/null || true
+        
+        # 安装新版本
+        helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
           -n kube-system \
           -f alb-values.yaml \
           --version 1.6.1 \
           --wait
         
         echo "⏳ Waiting for ALB Controller pods to be ready..."
-        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller -n kube-system --timeout=300s
+        sleep 30  # 给 Pod 一些启动时间
+        
+        # 等待 Pod 就绪
+        kubectl wait --for=condition=ready pod \
+          -l app.kubernetes.io/name=aws-load-balancer-controller \
+          -n kube-system \
+          --timeout=300s
         
         echo "✅ ALB Controller installed successfully with OIDC!"
+        
+        # 清理临时文件
+        rm -f alb-serviceaccount.yaml alb-values.yaml
 
   deploy-applications:
     name: "Deploy Applications to EKS"
@@ -186,6 +205,11 @@ jobs:
 
     - name: Setup Kubernetes tools
       uses: azure/setup-kubectl@v3
+
+    - name: Setup Helm for applications
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
 
     - name: Get Terraform Outputs
       run: |
@@ -236,8 +260,8 @@ jobs:
         # 创建命名空间（如果不存在）
         kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
         
-        # RDS Secret - 使用 cat 命令避免控制字符问题
-        cat <<EOF | kubectl apply -f -
+        # 使用文件方式创建 Secret，避免控制字符问题
+        cat > rds-secret.yaml <<EOF
         apiVersion: v1
         kind: Secret
         metadata:
@@ -251,9 +275,8 @@ jobs:
           database: "comicdb"
           password: "${{ secrets.DB_PASSWORD }}"
         EOF
-
-        # Backend Application Secrets
-        cat <<EOF | kubectl apply -f -
+        
+        cat > backend-secrets.yaml <<EOF
         apiVersion: v1
         kind: Secret
         metadata:
@@ -266,7 +289,13 @@ jobs:
           AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           S3_BUCKET_NAME: "$S3_BUCKET_NAME"
         EOF
-
+        
+        kubectl apply -f rds-secret.yaml
+        kubectl apply -f backend-secrets.yaml
+        
+        # 清理临时文件
+        rm -f rds-secret.yaml backend-secrets.yaml
+        
         echo "✅ Kubernetes secrets created successfully"
 
     - name: Deploy Applications to EKS
