@@ -239,6 +239,15 @@ jobs:
           FRONTEND_URL="http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
           echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
 
+          echo "✅ Deployment variables set:"
+          echo "  BACKEND_IMAGE: $BACKEND_IMAGE"
+          echo "  FRONTEND_IMAGE: $FRONTEND_IMAGE"
+          echo "  RDS_ENDPOINT: $RDS_ENDPOINT"
+          echo "  RDS_PORT: $RDS_PORT"
+          echo "  RDS_USERNAME: $RDS_USERNAME"
+          echo "  RDS_DATABASE: $RDS_DATABASE"
+          echo "  FRONTEND_URL: $FRONTEND_URL"
+
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
@@ -256,32 +265,57 @@ jobs:
           echo "🚀 Applying all manifests using Kustomize..."
           cd k8s
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
+          echo "✅ Kustomize deployment completed"
 
       - name: 🔄 Update Backend Image
         run: |
-          echo "🔄 Updating backend image..."
+          echo "🔄 Updating backend image to: $BACKEND_IMAGE"
           kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }}
-          echo "✅ Backend image updated to: $BACKEND_IMAGE"
+          echo "✅ Backend image updated"
 
       - name: 🔄 Update Frontend Image
         run: |
-          echo "🔄 Updating frontend image..."
+          echo "🔄 Updating frontend image to: $FRONTEND_IMAGE"
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }}
-          echo "✅ Frontend image updated to: $FRONTEND_IMAGE"
+          echo "✅ Frontend image updated"
 
-      - name: 🎯 Update Backend Environment Variables
+      - name: 🎯 Set Backend Environment Variables
         run: |
-          echo "🎯 Updating backend environment variables..."
+          echo "🎯 Setting backend environment variables..."
+          echo "RDS_ENDPOINT: $RDS_ENDPOINT"
+          echo "RDS_PORT: $RDS_PORT"
+          echo "RDS_DATABASE: $RDS_DATABASE"
+          echo "RDS_USERNAME: $RDS_USERNAME"
+          echo "DB_PASSWORD length: ${#DB_PASSWORD}"
           
+          # 验证关键环境变量
+          if [ -z "$RDS_ENDPOINT" ]; then
+            echo "❌ ERROR: RDS_ENDPOINT is empty"
+            exit 1
+          fi
+          
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "❌ ERROR: DB_PASSWORD is empty"
+            exit 1
+          fi
+          
+          echo "✅ All environment variables are valid"
+          
+          # 设置数据库环境变量
           kubectl set env deployment/backend-deployment -n ${{ env.NAMESPACE }} \
-            NODE_ENV=production \
-            PORT=3000 \
-            FRONTEND_URL="$FRONTEND_URL" \
             DB_HOST="$RDS_ENDPOINT" \
             DB_PORT="$RDS_PORT" \
             DB_NAME="$RDS_DATABASE" \
             DB_USER="$RDS_USERNAME" \
-            DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+            DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+          
+          echo "✅ Database environment variables set"
+          
+          # 设置其他环境变量
+          kubectl set env deployment/backend-deployment -n ${{ env.NAMESPACE }} \
+            NODE_ENV=production \
+            PORT=3000 \
+            FRONTEND_URL="$FRONTEND_URL" \
             JWT_SECRET="${{ secrets.JWT_SECRET }}" \
             JWT_EXPIRES_IN="7d" \
             AWS_REGION="${{ env.AWS_REGION }}" \
@@ -289,7 +323,28 @@ jobs:
             AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
             S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
           
-          echo "✅ Backend environment variables updated"
+          echo "✅ All environment variables set successfully"
+
+      - name: 🔍 Verify Environment Variables
+        run: |
+          echo "🔍 Verifying environment variables in deployment..."
+          sleep 10
+          
+          # 检查 deployment 的环境变量配置
+          echo "=== Deployment Environment Variables ==="
+          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].env}' | jq .
+          
+          # 等待 pod 启动并检查实际环境变量
+          echo "=== Waiting for pod to be ready ==="
+          kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=120s || true
+          
+          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$BACKEND_POD" ]; then
+            echo "=== Actual Pod Environment Variables ==="
+            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- env | grep -E "(DB_|NODE_ENV|PORT)" || echo "Pod not ready yet"
+          else
+            echo "❌ No backend pod found"
+          fi
 
       - name: ⏳ Wait for Deployments
         run: |
@@ -302,22 +357,16 @@ jobs:
           " || echo "⚠️ Backend deployment timeout, continuing..."
 
           timeout 180s bash -c "
-            while ! kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; do
+            while ! kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
               echo '⏳ Frontend still deploying...'
               sleep 10
             done
           " || echo "⚠️ Frontend deployment timeout, continuing..."
 
-      - name: 🔍 Verify Deployment
+      - name: 📊 Final Deployment Status
         run: |
-          echo "📊 Deployment status:"
+          echo "📊 Final deployment status:"
           kubectl get pods -n ${{ env.NAMESPACE }}
-          
-          echo -e "\n🔍 Backend environment variables:"
-          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-          if [ -n "$BACKEND_POD" ]; then
-            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- env | grep -E "(DB_|NODE_ENV|PORT)" || echo "Cannot check env vars"
-          fi
           
           echo -e "\n📋 Services:"
           kubectl get svc -n ${{ env.NAMESPACE }}
@@ -330,6 +379,7 @@ jobs:
           echo "🔍 Checking backend logs..."
           BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
           if [ -n "$BACKEND_POD" ]; then
+            echo "=== Backend Logs ==="
             kubectl logs $BACKEND_POD -n ${{ env.NAMESPACE }} --tail=50 || true
           else
             echo "❌ No backend pod found"
