@@ -25,6 +25,9 @@ jobs:
       rds_port: ${{ steps.terraform-outputs.outputs.rds_port }}
       rds_username: ${{ steps.terraform-outputs.outputs.rds_username }}
       rds_database: ${{ steps.terraform-outputs.outputs.rds_database }}
+      alb_controller_role_arn: ${{ steps.terraform-outputs.outputs.alb_controller_role_arn }}
+      backend_role_arn: ${{ steps.terraform-outputs.outputs.backend_role_arn }}
+      frontend_role_arn: ${{ steps.terraform-outputs.outputs.frontend_role_arn }}
 
     steps:
       - name: 🧩 Checkout code
@@ -81,6 +84,9 @@ jobs:
           RDS_PORT=$(jq -r '.rds_port.value // "5432"' outputs.json)
           RDS_USERNAME=$(jq -r '.rds_username.value // "comicadmin"' outputs.json)
           RDS_DATABASE=$(jq -r '.rds_database_name.value // "comicdb"' outputs.json)
+          ALB_CONTROLLER_ROLE_ARN=$(jq -r '.alb_controller_role_arn.value // empty' outputs.json)
+          BACKEND_ROLE_ARN=$(jq -r '.backend_role_arn.value // empty' outputs.json)
+          FRONTEND_ROLE_ARN=$(jq -r '.frontend_role_arn.value // empty' outputs.json)
           
           echo "Backend ECR URL: $BACKEND_ECR_URL"
           echo "Frontend ECR URL: $FRONTEND_ECR_URL"
@@ -88,6 +94,9 @@ jobs:
           echo "RDS Port: $RDS_PORT"
           echo "RDS Username: $RDS_USERNAME"
           echo "RDS Database: $RDS_DATABASE"
+          echo "ALB Controller Role ARN: $ALB_CONTROLLER_ROLE_ARN"
+          echo "Backend Role ARN: $BACKEND_ROLE_ARN"
+          echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
           
           if [ -z "$BACKEND_ECR_URL" ]; then
             echo "❌ Backend ECR URL is empty"
@@ -104,12 +113,28 @@ jobs:
             exit 1
           fi
           
+          if [ -z "$ALB_CONTROLLER_ROLE_ARN" ]; then
+            echo "❌ ALB Controller Role ARN is empty"
+            exit 1
+          fi
+          
+          if [ -z "$BACKEND_ROLE_ARN" ]; then
+            echo "⚠️ Backend Role ARN is empty - backend may not have AWS permissions"
+          fi
+          
+          if [ -z "$FRONTEND_ROLE_ARN" ]; then
+            echo "⚠️ Frontend Role ARN is empty - frontend may not have AWS permissions"
+          fi
+          
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "rds_endpoint=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
           echo "rds_port=$RDS_PORT" >> $GITHUB_OUTPUT
           echo "rds_username=$RDS_USERNAME" >> $GITHUB_OUTPUT
           echo "rds_database=$RDS_DATABASE" >> $GITHUB_OUTPUT
+          echo "alb_controller_role_arn=$ALB_CONTROLLER_ROLE_ARN" >> $GITHUB_OUTPUT
+          echo "backend_role_arn=$BACKEND_ROLE_ARN" >> $GITHUB_OUTPUT
+          echo "frontend_role_arn=$FRONTEND_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "✅ All outputs extracted successfully"
 
       - name: 🔍 Verify RDS Configuration
@@ -232,6 +257,9 @@ jobs:
           echo "  rds_port: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
           echo "  rds_username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
           echo "  rds_database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          echo "  alb_controller_role_arn: ${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
+          echo "  backend_role_arn: ${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
+          echo "  frontend_role_arn: ${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
           
           echo "build-and-push-images outputs:"
           echo "  backend_image: ${{ needs.build-and-push-images.outputs.backend_image }}"
@@ -246,6 +274,9 @@ jobs:
           RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          ALB_CONTROLLER_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
+          BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
+          FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
           
           echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
           echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
@@ -253,6 +284,9 @@ jobs:
           echo "RDS_PORT=$RDS_PORT" >> $GITHUB_ENV
           echo "RDS_USERNAME=$RDS_USERNAME" >> $GITHUB_ENV
           echo "RDS_DATABASE=$RDS_DATABASE" >> $GITHUB_ENV
+          echo "ALB_CONTROLLER_ROLE_ARN=$ALB_CONTROLLER_ROLE_ARN" >> $GITHUB_ENV
+          echo "BACKEND_ROLE_ARN=$BACKEND_ROLE_ARN" >> $GITHUB_ENV
+          echo "FRONTEND_ROLE_ARN=$FRONTEND_ROLE_ARN" >> $GITHUB_ENV
           
           # 清理 RDS 端点（移除端口部分）
           CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
@@ -270,6 +304,9 @@ jobs:
           echo "  RDS_PORT: $RDS_PORT"
           echo "  RDS_USERNAME: $RDS_USERNAME"
           echo "  RDS_DATABASE: $RDS_DATABASE"
+          echo "  ALB_CONTROLLER_ROLE_ARN: $ALB_CONTROLLER_ROLE_ARN"
+          echo "  BACKEND_ROLE_ARN: $BACKEND_ROLE_ARN"
+          echo "  FRONTEND_ROLE_ARN: $FRONTEND_ROLE_ARN"
           echo "  FRONTEND_URL: $FRONTEND_URL"
 
       - name: ☸️ Update kubeconfig
@@ -280,21 +317,93 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
+      - name: 🔧 Configure All Service Accounts with Dynamic IAM Roles
+        run: |
+          echo "🔧 Configuring all Service Accounts with dynamic IAM Roles..."
+          
+          # ALB Controller Service Account
+          ALB_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
+          if [ -n "$ALB_ROLE_ARN" ]; then
+            echo "📝 Configuring ALB Controller Service Account..."
+            kubectl apply -f - <<EOF
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: aws-load-balancer-controller
+              namespace: kube-system
+              labels:
+                app.kubernetes.io/name: aws-load-balancer-controller
+                app.kubernetes.io/component: controller
+              annotations:
+                eks.amazonaws.com/role-arn: "$ALB_ROLE_ARN"
+                eks.amazonaws.com/sts-regional-endpoints: "true"
+            EOF
+            echo "✅ ALB Controller Service Account configured"
+          else
+            echo "❌ ALB Role ARN is empty"
+            exit 1
+          fi
+          
+          # Backend Service Account
+          BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
+          if [ -n "$BACKEND_ROLE_ARN" ]; then
+            echo "📝 Configuring Backend Service Account..."
+            kubectl apply -f - <<EOF
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: comic-backend-sa
+              namespace: ${{ env.NAMESPACE }}
+              annotations:
+                eks.amazonaws.com/role-arn: "$BACKEND_ROLE_ARN"
+            EOF
+            echo "✅ Backend Service Account configured"
+          else
+            echo "⚠️ Backend Role ARN is empty - backend may not have AWS permissions"
+          fi
+          
+          # Frontend Service Account
+          FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
+          if [ -n "$FRONTEND_ROLE_ARN" ]; then
+            echo "📝 Configuring Frontend Service Account..."
+            kubectl apply -f - <<EOF
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: comic-frontend-sa
+              namespace: ${{ env.NAMESPACE }}
+              annotations:
+                eks.amazonaws.com/role-arn: "$FRONTEND_ROLE_ARN"
+            EOF
+            echo "✅ Frontend Service Account configured"
+          else
+            echo "⚠️ Frontend Role ARN is empty - frontend may not have AWS permissions"
+          fi
+          
+          # 重启相关部署以应用新的 Service Account
+          echo "🔄 Restarting deployments to use new Service Accounts..."
+          kubectl rollout restart deployment -n kube-system aws-load-balancer-controller
+          kubectl rollout restart deployment -n ${{ env.NAMESPACE }} backend-deployment
+          kubectl rollout restart deployment -n ${{ env.NAMESPACE }} frontend-deployment
+          
+          echo "⏳ Waiting for deployments to be ready..."
+          kubectl rollout status deployment -n kube-system aws-load-balancer-controller --timeout=180s
+          kubectl rollout status deployment -n ${{ env.NAMESPACE }} backend-deployment --timeout=180s
+          kubectl rollout status deployment -n ${{ env.NAMESPACE }} frontend-deployment --timeout=180s
+          
+          echo "✅ All Service Accounts configured successfully"
+
       - name: 🗃 Create Namespace
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: 🗑️ Clean Up Problematic Backend Deployment
+      - name: 🚀 Deploy using Kustomize (excluding Service Accounts)
         run: |
-          echo "🗑️ Cleaning up problematic backend deployment..."
-          kubectl delete deployment backend-deployment -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          echo "✅ Backend deployment deleted"
-          sleep 5
-
-      - name: 🚀 Deploy using Kustomize
-        run: |
-          echo "🚀 Applying all manifests using Kustomize..."
+          echo "🚀 Applying all manifests using Kustomize (excluding Service Accounts)..."
           cd k8s
+          
+          # 使用 Kustomize 部署除 Service Accounts 外的所有资源
+          # 因为 Service Accounts 已经在前面步骤中动态创建了
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
           echo "✅ Kustomize deployment completed"
 
@@ -357,6 +466,19 @@ jobs:
           
           echo "✅ All environment variables set successfully"
 
+      - name: 🔍 Verify Service Account Configurations
+        run: |
+          echo "🔍 Verifying Service Account configurations..."
+          
+          echo "=== ALB Controller Service Account ==="
+          kubectl get serviceaccount -n kube-system aws-load-balancer-controller -o yaml | grep -A 2 annotations
+          
+          echo "=== Backend Service Account ==="
+          kubectl get serviceaccount -n ${{ env.NAMESPACE }} comic-backend-sa -o yaml | grep -A 2 annotations || echo "Backend Service Account not found"
+          
+          echo "=== Frontend Service Account ==="
+          kubectl get serviceaccount -n ${{ env.NAMESPACE }} comic-frontend-sa -o yaml | grep -A 2 annotations || echo "Frontend Service Account not found"
+
       - name: 🔍 Verify Environment Variables
         run: |
           echo "🔍 Verifying environment variables in deployment..."
@@ -395,6 +517,18 @@ jobs:
             done
           " || echo "⚠️ Frontend deployment timeout, continuing..."
 
+      - name: 🌐 Check ALB Controller Status
+        run: |
+          echo "🌐 Checking ALB Controller status..."
+          echo "=== ALB Controller Pods ==="
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+          
+          echo "=== ALB Controller Logs ==="
+          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=20 || true
+          
+          echo "=== Ingress Status ==="
+          kubectl get ingress -n ${{ env.NAMESPACE }} -o wide
+
       - name: 📊 Final Deployment Status
         run: |
           echo "📊 Final deployment status:"
@@ -404,7 +538,7 @@ jobs:
           kubectl get svc -n ${{ env.NAMESPACE }}
           
           echo -e "\n🌐 Ingress:"
-          kubectl get ingress -n ${{ env.NAMESPACE }}
+          kubectl get ingress -n ${{ env.NAMESPACE }} -o yaml | grep -A 10 "status:"
 
       - name: 🔍 Check Application Logs
         run: |
@@ -420,13 +554,22 @@ jobs:
       - name: 🌐 Get ALB URL
         run: |
           echo "🚀 Retrieving ALB URL..."
-          for i in {1..5}; do
+          for i in {1..15}; do
             ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB_URL" ]; then
               echo "✅ ALB is ready: http://$ALB_URL"
               echo "ALB_URL=http://$ALB_URL" >> $GITHUB_ENV
               break
             fi
-            echo "⏳ ALB not ready yet (attempt $i/5)..."
-            sleep 10
+            echo "⏳ ALB not ready yet (attempt $i/15)..."
+            sleep 20
           done
+          
+          if [ -z "$ALB_URL" ]; then
+            echo "❌ ALB creation failed after 15 attempts"
+            echo "🔍 Checking ALB Controller logs for details..."
+            kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=50
+            echo "🔍 Checking Ingress events..."
+            kubectl describe ingress comic-website-ingress -n ${{ env.NAMESPACE }}
+            exit 1
+          fi

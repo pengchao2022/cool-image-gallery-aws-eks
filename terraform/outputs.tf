@@ -89,3 +89,13 @@ output "cluster_certificate_authority_data" {
   value       = module.eks.cluster_certificate_authority_data
 }
 
+output "backend_role_arn" {
+  description = "Backend application IAM role ARN"
+  value       = module.iam.app_backend_role_arn
+}
+
+output "frontend_role_arn" {
+  description = "Frontend application IAM role ARN"
+  value       = module.iam.app_frontend_role_arn
+}
+
