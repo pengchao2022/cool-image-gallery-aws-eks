@@ -406,41 +406,34 @@ jobs:
         run: |
           echo "🔧 Updating Kubernetes secrets with real values..."
           
-          # 构建完整的数据库连接字符串
-          export DATABASE_URL="postgresql://${{ needs.terraform-infrastructure.outputs.rds_username }}:${{ secrets.DB_PASSWORD }}@${{ needs.terraform-infrastructure.outputs.rds_endpoint }}/${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
-          export S3_BUCKET_NAME="$S3_BUCKET_NAME"
-          export AWS_REGION="${{ env.AWS_REGION }}"
+          # 删除旧的 secrets
+          kubectl delete secret rds-secret backend-secret s3-secret -n ${{ env.NAMESPACE }} --ignore-not-found
           
-          echo "Database URL: ${DATABASE_URL//:${{ secrets.DB_PASSWORD }}@/:***@}"  # 安全日志输出
-          echo "JWT Secret length: ${#JWT_SECRET} characters"
-          echo "S3 Bucket Name: $S3_BUCKET_NAME"
-          echo "AWS Region: $AWS_REGION"
+          # 创建 rds-secret
+          echo "=== Creating RDS Secret ==="
+          kubectl create secret generic rds-secret -n ${{ env.NAMESPACE }} \
+            --from-literal=host="$RDS_ENDPOINT_CLEANED" \
+            --from-literal=port="$RDS_PORT" \
+            --from-literal=database="$RDS_DATABASE" \
+            --from-literal=username="$RDS_USERNAME" \
+            --from-literal=password="${{ secrets.DB_PASSWORD }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
           
-          # 使用 envsubst 处理 backend-secret.yaml
-          envsubst < k8s/configs/backend-secret.yaml > k8s/configs/backend-secret-processed.yaml
+          # 创建 backend-secret
+          echo "=== Creating Backend Secret ==="
+          kubectl create secret generic backend-secret -n ${{ env.NAMESPACE }} \
+            --from-literal=jwt-secret="${{ secrets.JWT_SECRET }}" \
+            --from-literal=database-url="postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" \
+            --dry-run=client -o yaml | kubectl apply -f -
           
-          # 使用 envsubst 处理 s3-secret.yaml
-          envsubst < k8s/configs/s3-secret.yaml > k8s/configs/s3-secret-processed.yaml
+          # 创建 s3-secret
+          echo "=== Creating S3 Secret ==="
+          kubectl create secret generic s3-secret -n ${{ env.NAMESPACE }} \
+            --from-literal=bucket-name="$S3_BUCKET_NAME" \
+            --from-literal=aws-region="${{ env.AWS_REGION }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
           
-          # 应用处理后的 secrets
-          echo "=== Applying Backend Secret ==="
-          kubectl apply -f k8s/configs/backend-secret-processed.yaml
-          
-          echo "=== Applying S3 Secret ==="
-          kubectl apply -f k8s/configs/s3-secret-processed.yaml
-          
-          # 更新 RDS Secret
-          echo "=== Updating RDS Secret ==="
-          RDS_HOST_B64=$(echo -n "$RDS_ENDPOINT_CLEANED" | base64 -w 0)
-          RDS_PORT_B64=$(echo -n "$RDS_PORT" | base64 -w 0)
-          RDS_DATABASE_B64=$(echo -n "$RDS_DATABASE" | base64 -w 0)
-          RDS_USERNAME_B64=$(echo -n "$RDS_USERNAME" | base64 -w 0)
-          RDS_PASSWORD_B64=$(echo -n "${{ secrets.DB_PASSWORD }}" | base64 -w 0)
-          
-          kubectl patch secret rds-secret -n ${{ env.NAMESPACE }} -p="{\"data\":{\"host\":\"$RDS_HOST_B64\",\"port\":\"$RDS_PORT_B64\",\"database\":\"$RDS_DATABASE_B64\",\"username\":\"$RDS_USERNAME_B64\",\"password\":\"$RDS_PASSWORD_B64\"}}" --dry-run=client -o yaml | kubectl apply -f -
-          
-          echo "✅ All secrets updated with real values"
+          echo "✅ All secrets created with real values"
 
       - name: 🚀 Deploy using Kustomize
         run: |
@@ -467,13 +460,13 @@ jobs:
           sleep 5
           
           echo "=== RDS Secret Keys ==="
-          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | jq 'keys'
+          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | python3 -c "import json, sys; data = json.load(sys.stdin); print('Keys:', list(data.keys()))"
           
           echo "=== Backend Secret Keys ==="
-          kubectl get secret backend-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | jq 'keys'
+          kubectl get secret backend-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | python3 -c "import json, sys; data = json.load(sys.stdin); print('Keys:', list(data.keys()))"
           
           echo "=== S3 Secret Keys ==="
-          kubectl get secret s3-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | jq 'keys'
+          kubectl get secret s3-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | python3 -c "import json, sys; data = json.load(sys.stdin); print('Keys:', list(data.keys()))"
 
       - name: 🔍 Verify Environment Variables Configuration
         run: |
@@ -482,7 +475,7 @@ jobs:
           
           # 检查 deployment 的环境变量配置
           echo "=== Deployment Environment Variables ==="
-          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].env}' | jq .
+          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].env}' | python3 -c "import json, sys; data = json.load(sys.stdin); print(json.dumps(data, indent=2))"
           
           # 等待 pod 启动并检查实际环境变量
           echo "=== Waiting for pod to be ready ==="
