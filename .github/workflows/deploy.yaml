@@ -322,6 +322,11 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod a+x /usr/local/bin/yq
 
+      - name: 🔧 Install envsubst
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext-base
+
       - name: 🔧 Update Service Account Role ARNs
         run: |
           echo "🔧 Updating Service Account Role ARNs in YAML files..."
@@ -369,7 +374,21 @@ jobs:
         run: |
           echo "🔧 Updating Kubernetes secrets with real values..."
           
-          # 更新 RDS Secret
+          # 构建完整的数据库连接字符串
+          export DATABASE_URL="postgresql://${{ needs.terraform-infrastructure.outputs.rds_username }}:${{ secrets.DB_PASSWORD }}@${{ needs.terraform-infrastructure.outputs.rds_endpoint }}/${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          
+          echo "Database URL: ${DATABASE_URL//:${{ secrets.DB_PASSWORD }}@/:***@}"  # 安全日志输出
+          echo "JWT Secret length: ${#JWT_SECRET} characters"
+          
+          # 使用 envsubst 处理 backend-secret.yaml
+          envsubst < k8s/configs/backend-secret.yaml > k8s/configs/backend-secret-processed.yaml
+          
+          # 应用处理后的 secret
+          echo "=== Applying Backend Secret ==="
+          kubectl apply -f k8s/configs/backend-secret-processed.yaml
+          
+          # 更新 RDS Secret（保持你原有的逻辑）
           echo "=== Updating RDS Secret ==="
           RDS_HOST_B64=$(echo -n "$RDS_ENDPOINT_CLEANED" | base64 -w 0)
           RDS_PORT_B64=$(echo -n "$RDS_PORT" | base64 -w 0)
@@ -378,11 +397,6 @@ jobs:
           RDS_PASSWORD_B64=$(echo -n "${{ secrets.DB_PASSWORD }}" | base64 -w 0)
           
           kubectl patch secret rds-secret -n ${{ env.NAMESPACE }} -p="{\"data\":{\"host\":\"$RDS_HOST_B64\",\"port\":\"$RDS_PORT_B64\",\"database\":\"$RDS_DATABASE_B64\",\"username\":\"$RDS_USERNAME_B64\",\"password\":\"$RDS_PASSWORD_B64\"}}" --dry-run=client -o yaml | kubectl apply -f -
-          
-          # 更新 Backend Secret (JWT)
-          echo "=== Updating Backend Secret ==="
-          JWT_SECRET_B64=$(echo -n "${{ secrets.JWT_SECRET }}" | base64 -w 0)
-          kubectl patch secret backend-secret -n ${{ env.NAMESPACE }} -p="{\"data\":{\"jwt-secret\":\"$JWT_SECRET_B64\"}}" --dry-run=client -o yaml | kubectl apply -f -
           
           # 更新 S3 Secret
           echo "=== Updating S3 Secret ==="
