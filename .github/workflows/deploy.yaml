@@ -488,7 +488,8 @@ jobs:
           kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
           
           echo "=== ALB Controller Logs ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=10
+          # 忽略日志错误，使用 || true 防止脚本退出
+          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=10 || true
 
       - name: 🗃 Create Namespace
         run: |
@@ -617,6 +618,7 @@ jobs:
           kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
           
           echo "=== ALB Controller Logs ==="
+          # 忽略日志错误
           kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=20 || true
           
           echo "=== Ingress Status ==="
@@ -661,7 +663,8 @@ jobs:
           if [ -z "$ALB_URL" ]; then
             echo "❌ ALB creation failed after 15 attempts"
             echo "🔍 Checking ALB Controller logs for details..."
-            kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=50
+
+            kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=50 || true
             echo "🔍 Checking Ingress events..."
             kubectl describe ingress comic-website-ingress -n ${{ env.NAMESPACE }}
             exit 1
