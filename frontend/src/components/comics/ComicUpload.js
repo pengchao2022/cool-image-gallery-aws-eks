@@ -1,152 +1,213 @@
-import React, { useState } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { comicService } from '../../services/api';
-import './ComicUpload.css';
+import React, { useState, useContext } from 'react';
+import { AuthContext } from '../../context/AuthContext';
 
-const ComicUpload = () => {
-  const [uploading, setUploading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [formData, setFormData] = useState({
+const ComicUpload = ({ onComicUpload }) => {
+  const { currentUser, login, register } = useContext(AuthContext);
+  const [activeModal, setActiveModal] = useState(null);
+  const [uploadData, setUploadData] = useState({
     title: '',
     description: '',
-    tags: ''
+    file: null
   });
 
-  const { getRootProps, getInputProps, isDragActive, acceptedFiles } = useDropzone({
-    accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp']
-    },
-    maxFiles: 10,
-    multiple: true
-  });
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setUploadData(prev => ({ ...prev, file }));
+      // 更新上传区域显示
+      const uploadArea = document.getElementById('uploadArea');
+      if (uploadArea) {
+        uploadArea.innerHTML = `
+          <i class="fas fa-file-image"></i>
+          <p class="upload-text">已选择文件: ${file.name}</p>
+          <p class="upload-hint">点击此处更换文件</p>
+        `;
+      }
+    }
   };
 
-  const handleSubmit = async (e) => {
+  const handleUpload = (e) => {
     e.preventDefault();
+    if (!uploadData.title || !uploadData.file) {
+      alert('请填写漫画标题并选择文件！');
+      return;
+    }
+
+    const newComic = {
+      id: Date.now(),
+      title: uploadData.title,
+      author: currentUser.username,
+      image: URL.createObjectURL(uploadData.file)
+    };
+
+    onComicUpload(newComic);
+    setActiveModal(null);
+    setUploadData({ title: '', description: '', file: null });
     
-    if (acceptedFiles.length === 0) {
-      setMessage('Please select at least one image');
+    // 重置上传区域
+    const uploadArea = document.getElementById('uploadArea');
+    if (uploadArea) {
+      uploadArea.innerHTML = `
+        <i class="fas fa-cloud-upload-alt"></i>
+        <p class="upload-text">点击或拖拽文件到此处上传</p>
+        <p class="upload-hint">支持 JPG, PNG 格式，最大 10MB</p>
+      `;
+    }
+    
+    alert('漫画上传成功！');
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('loginEmail').value;
+    const password = document.getElementById('loginPassword').value;
+    
+    await login(email, password);
+    setActiveModal(null);
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('registerUsername').value;
+    const email = document.getElementById('registerEmail').value;
+    const password = document.getElementById('registerPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    
+    if (password !== confirmPassword) {
+      alert('两次输入的密码不一致！');
       return;
     }
+    
+    await register(username, email, password);
+    setActiveModal(null);
+  };
 
-    if (!formData.title.trim()) {
-      setMessage('Please enter a title');
-      return;
-    }
-
-    try {
-      setUploading(true);
-      setMessage('');
-
-      const uploadData = new FormData();
-      uploadData.append('title', formData.title);
-      uploadData.append('description', formData.description);
-      uploadData.append('tags', formData.tags);
-      
-      acceptedFiles.forEach(file => {
-        uploadData.append('images', file);
-      });
-
-      await comicService.uploadComic(uploadData);
-      
-      setMessage('Comic uploaded successfully!');
-      setFormData({ title: '', description: '', tags: '' });
-      acceptedFiles.length = 0;
-      
-    } catch (error) {
-      setMessage('Upload failed: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setUploading(false);
-    }
+  const closeModal = () => {
+    setActiveModal(null);
   };
 
   return (
-    <div className="comic-upload">
-      <h2>Upload New Comic</h2>
-      
-      <form onSubmit={handleSubmit} className="upload-form">
-        <div className="form-group">
-          <label htmlFor="title">Title *</label>
-          <input
-            type="text"
-            id="title"
-            name="title"
-            value={formData.title}
-            onChange={handleInputChange}
-            required
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="description">Description</label>
-          <textarea
-            id="description"
-            name="description"
-            value={formData.description}
-            onChange={handleInputChange}
-            rows="4"
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="tags">Tags (comma separated)</label>
-          <input
-            type="text"
-            id="tags"
-            name="tags"
-            value={formData.tags}
-            onChange={handleInputChange}
-            placeholder="fantasy, adventure, comedy"
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Upload Images *</label>
-          <div
-            {...getRootProps()}
-            className={`dropzone ${isDragActive ? 'active' : ''}`}
-          >
-            <input {...getInputProps()} />
-            {isDragActive ? (
-              <p>Drop the images here...</p>
-            ) : (
-              <p>Drag & drop images here, or click to select</p>
-            )}
-          </div>
-          {acceptedFiles.length > 0 && (
-            <div className="file-list">
-              <h4>Selected files:</h4>
-              <ul>
-                {acceptedFiles.map(file => (
-                  <li key={file.path}>{file.path} - {(file.size / 1024 / 1024).toFixed(2)} MB</li>
-                ))}
-              </ul>
+    <>
+      {/* 登录模态框 */}
+      {activeModal === 'login' && (
+        <div className="modal">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3 className="modal-title">登录账号</h3>
+              <button className="close-modal" onClick={closeModal}>&times;</button>
             </div>
-          )}
-        </div>
-
-        {message && (
-          <div className={`message ${message.includes('success') ? 'success' : 'error'}`}>
-            {message}
+            <form onSubmit={handleLogin}>
+              <div className="form-group">
+                <label htmlFor="loginEmail">邮箱</label>
+                <input type="email" id="loginEmail" className="form-control" placeholder="请输入邮箱" required />
+              </div>
+              <div className="form-group">
+                <label htmlFor="loginPassword">密码</label>
+                <input type="password" id="loginPassword" className="form-control" placeholder="请输入密码" required />
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>登录</button>
+            </form>
+            <p style={{ textAlign: 'center', marginTop: '20px' }}>
+              还没有账号？<a href="#" onClick={() => setActiveModal('register')}>立即注册</a>
+            </p>
           </div>
-        )}
+        </div>
+      )}
 
-        <button 
-          type="submit" 
-          disabled={uploading}
-          className="upload-button"
-        >
-          {uploading ? 'Uploading...' : 'Upload Comic'}
-        </button>
-      </form>
-    </div>
+      {/* 注册模态框 */}
+      {activeModal === 'register' && (
+        <div className="modal">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3 className="modal-title">注册账号</h3>
+              <button className="close-modal" onClick={closeModal}>&times;</button>
+            </div>
+            <form onSubmit={handleRegister}>
+              <div className="form-group">
+                <label htmlFor="registerUsername">用户名</label>
+                <input type="text" id="registerUsername" className="form-control" placeholder="请输入用户名" required />
+              </div>
+              <div className="form-group">
+                <label htmlFor="registerEmail">邮箱</label>
+                <input type="email" id="registerEmail" className="form-control" placeholder="请输入邮箱" required />
+              </div>
+              <div className="form-group">
+                <label htmlFor="registerPassword">密码</label>
+                <input type="password" id="registerPassword" className="form-control" placeholder="请输入密码" required />
+              </div>
+              <div className="form-group">
+                <label htmlFor="confirmPassword">确认密码</label>
+                <input type="password" id="confirmPassword" className="form-control" placeholder="请再次输入密码" required />
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>注册</button>
+            </form>
+            <p style={{ textAlign: 'center', marginTop: '20px' }}>
+              已有账号？<a href="#" onClick={() => setActiveModal('login')}>立即登录</a>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 上传模态框 */}
+      {activeModal === 'upload' && (
+        <div className="modal">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3 className="modal-title">上传漫画</h3>
+              <button className="close-modal" onClick={closeModal}>&times;</button>
+            </div>
+            <form onSubmit={handleUpload}>
+              <div className="form-group">
+                <label htmlFor="comicTitle">漫画标题</label>
+                <input 
+                  type="text" 
+                  id="comicTitle" 
+                  className="form-control" 
+                  placeholder="请输入漫画标题" 
+                  value={uploadData.title}
+                  onChange={(e) => setUploadData(prev => ({ ...prev, title: e.target.value }))}
+                  required 
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="comicDescription">漫画描述</label>
+                <textarea 
+                  id="comicDescription" 
+                  className="form-control" 
+                  rows="3" 
+                  placeholder="请输入漫画描述"
+                  value={uploadData.description}
+                  onChange={(e) => setUploadData(prev => ({ ...prev, description: e.target.value }))}
+                ></textarea>
+              </div>
+              <div className="form-group">
+                <label>上传漫画图片</label>
+                <div 
+                  className="upload-area" 
+                  id="uploadArea"
+                  onClick={() => document.getElementById('comicFile').click()}
+                >
+                  <i className="fas fa-cloud-upload-alt"></i>
+                  <p className="upload-text">点击或拖拽文件到此处上传</p>
+                  <p className="upload-hint">支持 JPG, PNG 格式，最大 10MB</p>
+                  <input 
+                    type="file" 
+                    id="comicFile" 
+                    className="file-input" 
+                    accept="image/*" 
+                    onChange={handleFileSelect}
+                    required 
+                  />
+                </div>
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>上传</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 触发按钮 - 在Header中已经包含 */}
+    </>
   );
 };
 

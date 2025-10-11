@@ -1,74 +1,63 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { authService } from '../services/auth';
+import React, { createContext, useState, useEffect } from 'react';
 
-const AuthContext = createContext();
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
+export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      authService.verifyToken(token)
-        .then(userData => {
-          setUser(userData);
-        })
-        .catch(() => {
-          localStorage.removeItem('token');
-        })
-        .finally(() => {
-          setLoading(false);
-        });
-    } else {
-      setLoading(false);
+    // 检查本地存储中是否有用户信息
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
     }
   }, []);
 
   const login = async (email, password) => {
-    try {
-      const { user: userData, token } = await authService.login(email, password);
-      localStorage.setItem('token', token);
-      setUser(userData);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    // 模拟登录API调用
+    // 在实际应用中，这里应该调用您的后端API
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const user = {
+          username: email.split('@')[0],
+          email: email,
+          avatar: email[0].toUpperCase()
+        };
+        setCurrentUser(user);
+        localStorage.setItem('currentUser', JSON.stringify(user));
+        resolve(user);
+      }, 1000);
+    });
   };
 
-  const register = async (userData) => {
-    try {
-      const result = await authService.register(userData);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+  const register = async (username, email, password) => {
+    // 模拟注册API调用
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const user = {
+          username: username,
+          email: email,
+          avatar: username[0].toUpperCase()
+        };
+        setCurrentUser(user);
+        localStorage.setItem('currentUser', JSON.stringify(user));
+        resolve(user);
+      }, 1000);
+    });
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    setUser(null);
-  };
-
-  const value = {
-    user,
-    login,
-    register,
-    logout,
-    loading,
-    isAuthenticated: !!user
+    setCurrentUser(null);
+    localStorage.removeItem('currentUser');
   };
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{
+      currentUser,
+      login,
+      register,
+      logout
+    }}>
       {children}
     </AuthContext.Provider>
   );

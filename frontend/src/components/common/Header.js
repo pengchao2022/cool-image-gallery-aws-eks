@@ -1,45 +1,51 @@
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import './Header.css';
+import React, { useContext } from 'react';
+import { AuthContext } from '../../context/AuthContext';
+import '../../App.css';
 
 const Header = () => {
-  const { user, logout, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
-
-  const handleLogout = () => {
-    logout();
-    navigate('/');
-  };
+  const { currentUser, logout } = useContext(AuthContext);
 
   return (
-    <header className="header">
+    <header>
       <div className="container">
-        <Link to="/" className="logo">
-          <h1>ComicHub</h1>
-        </Link>
-        
-        <nav className="nav">
-          <Link to="/browse" className="nav-link">Browse Comics</Link>
-          
-          {isAuthenticated ? (
-            <>
-              <Link to="/upload" className="nav-link">Upload</Link>
-              <Link to="/my-comics" className="nav-link">My Comics</Link>
-              <div className="user-menu">
-                <span>Welcome, {user?.username}</span>
-                <Link to="/profile" className="nav-link">Profile</Link>
-                <button onClick={handleLogout} className="logout-btn">
-                  Logout
+        <nav>
+          <div className="logo">
+            <i className="fas fa-book-open"></i>
+            <span>漫画世界</span>
+          </div>
+          <ul className="nav-links">
+            <li><a href="#" className="active">首页</a></li>
+            <li><a href="#">发现</a></li>
+            <li><a href="#">排行榜</a></li>
+            <li><a href="#">分类</a></li>
+          </ul>
+          <div className="auth-buttons">
+            {currentUser ? (
+              <div className="user-info">
+                <div className="user-avatar">
+                  {currentUser.avatar}
+                </div>
+                <button className="btn btn-outline" onClick={logout}>
+                  退出
                 </button>
               </div>
-            </>
-          ) : (
-            <div className="auth-links">
-              <Link to="/login" className="nav-link">Login</Link>
-              <Link to="/register" className="nav-link register">Register</Link>
-            </div>
-          )}
+            ) : (
+              <>
+                <button 
+                  className="btn btn-outline" 
+                  onClick={() => document.getElementById('loginModal').style.display = 'flex'}
+                >
+                  登录
+                </button>
+                <button 
+                  className="btn btn-primary"
+                  onClick={() => document.getElementById('registerModal').style.display = 'flex'}
+                >
+                  注册
+                </button>
+              </>
+            )}
+          </div>
         </nav>
       </div>
     </header>
