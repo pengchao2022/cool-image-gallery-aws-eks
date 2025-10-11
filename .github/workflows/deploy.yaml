@@ -256,10 +256,43 @@ jobs:
           envsubst < k8s/configs/s3-secret.yaml > k8s/configs/s3-secret.yaml.tmp
           mv k8s/configs/s3-secret.yaml.tmp k8s/configs/s3-secret.yaml
 
-      - name: 🚀 Deploy using Kustomize
+      - name: 🚀 Deploy Resources (excluding Deployments)
         run: |
           cd k8s
-          kubectl apply -k . --namespace ${{ env.NAMESPACE }}
+          # 应用所有资源，除了 Deployments
+          kubectl apply -f namespaces/comic-website.yaml
+          kubectl apply -f service-accounts/alb-service-account.yaml
+          kubectl apply -f service-accounts/backend-service-account.yaml
+          kubectl apply -f service-accounts/frontend-service-account.yaml
+          kubectl apply -f configs/backend-config.yaml
+          kubectl apply -f configs/frontend-config.yaml
+          kubectl apply -f configs/rds-secret.yaml
+          kubectl apply -f configs/backend-secret.yaml
+          kubectl apply -f configs/s3-secret.yaml
+          kubectl apply -f service/backend-service.yaml
+          kubectl apply -f service/frontend-service.yaml
+          kubectl apply -f networking/alb-ingress-class.yaml
+          kubectl apply -f networking/alb-ingress.yaml
+
+      - name: 🚀 Deploy or Replace Deployments
+        run: |
+          cd k8s
+          # 检查 Deployment 是否存在，如果存在则替换，否则创建
+          if kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} &> /dev/null; then
+            echo "🔄 Replacing existing backend-deployment..."
+            kubectl replace -f deployments/backend-deployment.yaml -n ${{ env.NAMESPACE }} --force
+          else
+            echo "🚀 Creating new backend-deployment..."
+            kubectl apply -f deployments/backend-deployment.yaml -n ${{ env.NAMESPACE }}
+          fi
+          
+          if kubectl get deployment frontend-deployment -n ${{ env.NAMESPACE }} &> /dev/null; then
+            echo "🔄 Replacing existing frontend-deployment..."
+            kubectl replace -f deployments/frontend-deployment.yaml -n ${{ env.NAMESPACE }} --force
+          else
+            echo "🚀 Creating new frontend-deployment..."
+            kubectl apply -f deployments/frontend-deployment.yaml -n ${{ env.NAMESPACE }}
+          fi
 
       - name: 🧹 Clean Up Existing Migration Job
         run: |
@@ -283,14 +316,17 @@ jobs:
             exit 1
           fi
 
-      - name: 🔄 Update Backend Image
+      - name: 🔄 Update Deployment Images
         run: |
-          kubectl set image deployment/backend-deployment backend=${{ needs.build-and-push-images.outputs.backend_image }} -n ${{ env.NAMESPACE }}
-          kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
-
-      - name: 🔄 Update Frontend Image
-        run: |
-          kubectl set image deployment/frontend-deployment frontend=${{ needs.build-and-push-images.outputs.frontend_image }} -n ${{ env.NAMESPACE }}
+          # 使用 patch 更新镜像（不会触发 selector 不可变错误）
+          BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
+          FRONTEND_IMAGE="${{ needs.build-and-push-images.outputs.frontend_image }}"
+          
+          kubectl patch deployment backend-deployment -n ${{ env.NAMESPACE }} \
+            -p='{"spec":{"template":{"spec":{"containers":[{"name":"backend","image":"'"$BACKEND_IMAGE"'"}]}}}}'
+          
+          kubectl patch deployment frontend-deployment -n ${{ env.NAMESPACE }} \
+            -p='{"spec":{"template":{"spec":{"containers":[{"name":"frontend","image":"'"$FRONTEND_IMAGE"'"}]}}}}'
 
       - name: ⏳ Wait for Deployments
         run: |
