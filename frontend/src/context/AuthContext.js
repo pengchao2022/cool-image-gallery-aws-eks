@@ -6,7 +6,6 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
-    // 检查本地存储中是否有用户信息
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
       setCurrentUser(JSON.parse(savedUser));
@@ -14,14 +13,14 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (email, password) => {
-    // 模拟登录API调用
-    // 在实际应用中，这里应该调用您的后端API
     return new Promise((resolve) => {
       setTimeout(() => {
         const user = {
+          id: Date.now(),
           username: email.split('@')[0],
           email: email,
-          avatar: email[0].toUpperCase()
+          avatar: email[0].toUpperCase(),
+          registrationDate: new Date().toISOString().split('T')[0]
         };
         setCurrentUser(user);
         localStorage.setItem('currentUser', JSON.stringify(user));
@@ -31,13 +30,14 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (username, email, password) => {
-    // 模拟注册API调用
     return new Promise((resolve) => {
       setTimeout(() => {
         const user = {
+          id: Date.now(),
           username: username,
           email: email,
-          avatar: username[0].toUpperCase()
+          avatar: username[0].toUpperCase(),
+          registrationDate: new Date().toISOString().split('T')[0]
         };
         setCurrentUser(user);
         localStorage.setItem('currentUser', JSON.stringify(user));
