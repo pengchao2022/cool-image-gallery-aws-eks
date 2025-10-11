@@ -1,59 +1,28 @@
-import axios from 'axios';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import Header from './components/common/Header';
+import Browse from './pages/Browse';
+import Profile from './pages/Profile';
+import './App.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <div className="App">
+          <Header />
+          <main>
+            <Routes>
+              <Route path="/" element={<Browse />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/browse" element={<Browse />} />
+            </Routes>
+          </main>
+        </div>
+      </Router>
+    </AuthProvider>
+  );
+}
 
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Request interceptor to add auth token
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Response interceptor to handle errors
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
-  }
-);
-
-export const comicService = {
-  getAllComics: (page = 1, limit = 12) => 
-    api.get(`/comics?page=${page}&limit=${limit}`),
-  
-  getComic: (id) => 
-    api.get(`/comics/${id}`),
-  
-  getUserComics: (page = 1, limit = 12) => 
-    api.get(`/comics/my-comics?page=${page}&limit=${limit}`),
-  
-  uploadComic: (formData) => 
-    api.post('/comics', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    }),
-  
-  deleteComic: (id) => 
-    api.delete(`/comics/${id}`),
-};
-
-export default api;
+export default App;

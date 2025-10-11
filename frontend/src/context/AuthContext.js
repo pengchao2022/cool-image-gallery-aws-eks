@@ -1,59 +1,68 @@
 import React, { createContext, useState, useEffect } from 'react';
+import authService from '../services/auth';
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('currentUser');
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
+    initializeAuth();
   }, []);
 
-  const login = async (email, password) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const user = {
-          id: Date.now(),
-          username: email.split('@')[0],
-          email: email,
-          avatar: email[0].toUpperCase(),
-          registrationDate: new Date().toISOString().split('T')[0]
-        };
+  const initializeAuth = async () => {
+    try {
+      const user = authService.getCurrentUser();
+      const token = authService.getToken();
+      
+      if (user && token) {
         setCurrentUser(user);
-        localStorage.setItem('currentUser', JSON.stringify(user));
-        resolve(user);
-      }, 1000);
-    });
+      }
+    } catch (error) {
+      console.error('认证初始化失败:', error);
+      authService.logout();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const login = async (email, password) => {
+    try {
+      setError(null);
+      const response = await authService.login(email, password);
+      setCurrentUser(response.user);
+      return response;
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
   };
 
   const register = async (username, email, password) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const user = {
-          id: Date.now(),
-          username: username,
-          email: email,
-          avatar: username[0].toUpperCase(),
-          registrationDate: new Date().toISOString().split('T')[0]
-        };
-        setCurrentUser(user);
-        localStorage.setItem('currentUser', JSON.stringify(user));
-        resolve(user);
-      }, 1000);
-    });
+    try {
+      setError(null);
+      const response = await authService.register(username, email, password);
+      setCurrentUser(response.user);
+      return response;
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
   };
 
   const logout = () => {
+    authService.logout();
     setCurrentUser(null);
-    localStorage.removeItem('currentUser');
+    setError(null);
   };
 
   return (
     <AuthContext.Provider value={{
       currentUser,
+      loading,
+      error,
       login,
       register,
       logout
