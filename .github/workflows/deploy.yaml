@@ -307,23 +307,47 @@ jobs:
             kubectl apply -f deployments/frontend-deployment.yaml -n ${{ env.NAMESPACE }}
           fi
 
+      - name: 🔍 Check if Migration is Needed
+        id: check-migration
+        run: |
+          # 检查当前运行的 backend 镜像
+          CURRENT_BACKEND_IMAGE=$(kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          NEW_BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
+          
+          echo "Current backend image: $CURRENT_BACKEND_IMAGE"
+          echo "New backend image: $NEW_BACKEND_IMAGE"
+          
+          # 如果镜像发生变化或者这是首次部署，则执行迁移
+          if [ "$CURRENT_BACKEND_IMAGE" != "$NEW_BACKEND_IMAGE" ] || [ -z "$CURRENT_BACKEND_IMAGE" ]; then
+            echo "🔄 Backend image changed or first deployment, migration is needed"
+            echo "migration_needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Backend image unchanged, skipping migration"
+            echo "migration_needed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: 🧹 Clean Up Existing Migration Job
+        if: steps.check-migration.outputs.migration_needed == 'true'
         run: |
           kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
 
-      - name: 🗃 Run Database Migrations
+      - name: 🗃 Run Database Migrations (if needed)
+        if: steps.check-migration.outputs.migration_needed == 'true'
         run: |
+          echo "🚀 Running database migrations..."
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
           kubectl apply -f /tmp/db-migration-job.yaml
 
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
+            echo "✅ Migration completed successfully"
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
+            echo "❌ Migration failed"
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
             exit 1
@@ -335,9 +359,11 @@ jobs:
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
           FRONTEND_IMAGE="${{ needs.build-and-push-images.outputs.frontend_image }}"
           
+          echo "Updating backend deployment image to: $BACKEND_IMAGE"
           kubectl patch deployment backend-deployment -n ${{ env.NAMESPACE }} \
             -p='{"spec":{"template":{"spec":{"containers":[{"name":"backend","image":"'"$BACKEND_IMAGE"'"}]}}}}'
           
+          echo "Updating frontend deployment image to: $FRONTEND_IMAGE"
           kubectl patch deployment frontend-deployment -n ${{ env.NAMESPACE }} \
             -p='{"spec":{"template":{"spec":{"containers":[{"name":"frontend","image":"'"$FRONTEND_IMAGE"'"}]}}}}'
 
@@ -379,8 +405,7 @@ jobs:
           echo "   ${{ steps.get-alb-url.outputs.alb_url }}"
           echo ""
           echo "📋 Additional Information:"
-          echo "   - Terraform ALB URL: ${{ needs.terraform-infrastructure.outputs.alb_url }}"
-          echo "   - Kubernetes ALB URL: ${{ steps.get-alb-url.outputs.alb_url }}"
+          echo "   - Migration Executed: ${{ steps.check-migration.outputs.migration_needed }}"
           echo "   - Cluster: ${{ env.CLUSTER_NAME }}"
           echo "   - Namespace: ${{ env.NAMESPACE }}"
           echo "   - Region: ${{ env.AWS_REGION }}"
