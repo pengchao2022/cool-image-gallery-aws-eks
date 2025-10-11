@@ -31,8 +31,8 @@ resources:
   - networking/alb-ingress-class.yaml
   - networking/alb-ingress.yaml
 
-  # Jobs
-  - jobs/database-migration.yaml
+  # Migration
+  - migrations/db-migration-job.yaml
 
 # 添加 ConfigMap 用于变量替换
 configMapGenerator:
