@@ -21,62 +21,62 @@ spec:
         ports:
         - containerPort: 3000
         env:
-          # 数据库配置 - 从 Secret 获取
-          - name: DB_HOST
-            valueFrom:
-              secretKeyRef:
-                name: rds-secret
-                key: host
-          - name: DB_PORT
-            valueFrom:
-              secretKeyRef:
-                name: rds-secret
-                key: port
-          - name: DB_NAME
-            valueFrom:
-              secretKeyRef:
-                name: rds-secret
-                key: database
-          - name: DB_USER
-            valueFrom:
-              secretKeyRef:
-                name: rds-secret
-                key: username
-          - name: DB_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: rds-secret
-                key: password
-          
-          # 应用配置
-          - name: NODE_ENV
-            value: "production"
-          - name: PORT
-            value: "3000"
-          - name: JWT_SECRET
-            valueFrom:
-              secretKeyRef:
-                name: backend-secret
-                key: jwt-secret
-          - name: JWT_EXPIRES_IN
-            value: "7d"
-          
-          # AWS 配置
-          - name: AWS_REGION
-            value: "us-east-1"
-          - name: S3_BUCKET_NAME
-            valueFrom:
-              secretKeyRef:
-                name: s3-secret
-                key: bucket-name
-          
-          # 前端 URL
-          - name: FRONTEND_URL
-            value: "http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
-          
-          # CORS 配置
-          - name: CORS_ORIGIN
-            value: "*"
+        # 数据库配置 - 从 Secret 获取
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: host
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: port
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: database
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: password
+        
+        # 应用配置
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: backend-secret
+              key: jwt-secret
+        - name: JWT_EXPIRES_IN
+          value: "7d"
+        
+        # AWS 配置
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            secretKeyRef:
+              name: s3-secret
+              key: bucket-name
+        
+        # 前端 URL
+        - name: FRONTEND_URL
+          value: "http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
+        
+        # CORS 配置
+        - name: CORS_ORIGIN
+          value: "*"
         resources:
           requests:
             memory: "256Mi"
