@@ -503,100 +503,94 @@ jobs:
           RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
           
           echo "Database connection details:"
           echo "Endpoint: $RDS_ENDPOINT"
           echo "Port: $RDS_PORT"
           echo "Username: $RDS_USERNAME"
           echo "Database: $RDS_DATABASE"
+          echo "Backend Image: $BACKEND_IMAGE"
           
           # 清理 RDS 端点（移除端口部分）
           CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
           
-          # 创建迁移 SQL 文件
-          cat > /tmp/migration.sql << 'EOF'
-          -- Enable trigram extension for better text search
-          CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
-          -- Create users table
-          CREATE TABLE IF NOT EXISTS users (
-              id SERIAL PRIMARY KEY,
-              username VARCHAR(50) UNIQUE NOT NULL,
-              email VARCHAR(255) UNIQUE NOT NULL,
-              password_hash VARCHAR(255) NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-
-          -- Create comics table
-          CREATE TABLE IF NOT EXISTS comics (
-              id SERIAL PRIMARY KEY,
-              title VARCHAR(255) NOT NULL,
-              description TEXT,
-              tags VARCHAR(500),
-              user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-              image_urls TEXT[] NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-
-          -- Create indexes
-          CREATE INDEX IF NOT EXISTS idx_comics_user_id ON comics(user_id);
-          CREATE INDEX IF NOT EXISTS idx_comics_created_at ON comics(created_at DESC);
-          CREATE INDEX IF NOT EXISTS idx_comics_tags ON comics USING gin(tags gin_trgm_ops);
-          CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
-          -- Create updated_at trigger function
-          CREATE OR REPLACE FUNCTION update_updated_at_column()
-          RETURNS TRIGGER AS $$
-          BEGIN
-              NEW.updated_at = CURRENT_TIMESTAMP;
-              RETURN NEW;
-          END;
-          $$ language 'plpgsql';
-
-          -- Create triggers for updated_at
-          DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-          CREATE TRIGGER update_users_updated_at
-              BEFORE UPDATE ON users
-              FOR EACH ROW
-              EXECUTE FUNCTION update_updated_at_column();
-
-          DROP TRIGGER IF EXISTS update_comics_updated_at ON comics;
-          CREATE TRIGGER update_comics_updated_at
-              BEFORE UPDATE ON comics
-              FOR EACH ROW
-              EXECUTE FUNCTION update_updated_at_column();
+          # 创建迁移 Job YAML 文件
+          cat > /tmp/db-migration-job.yaml << EOF
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: db-migration
+            namespace: ${{ env.NAMESPACE }}
+          spec:
+            template:
+              metadata:
+                labels:
+                  app: db-migration
+              spec:
+                containers:
+                - name: migration
+                  image: $BACKEND_IMAGE
+                  command: ["npm", "run", "migrate"]
+                  env:
+                  - name: NODE_ENV
+                    value: "production"
+                  - name: RDS_HOST
+                    value: "$CLEANED_RDS_ENDPOINT"
+                  - name: RDS_PORT
+                    value: "$RDS_PORT"
+                  - name: RDS_USERNAME
+                    value: "$RDS_USERNAME"
+                  - name: RDS_PASSWORD
+                    value: "${{ secrets.DB_PASSWORD }}"
+                  - name: RDS_DATABASE
+                    value: "$RDS_DATABASE"
+                  - name: JWT_SECRET
+                    value: "${{ secrets.JWT_SECRET }}"
+                  - name: AWS_REGION
+                    value: "${{ env.AWS_REGION }}"
+                  - name: S3_BUCKET_NAME
+                    value: "${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
+                restartPolicy: Never
+            backoffLimit: 3
+            activeDeadlineSeconds: 300
           EOF
 
-          echo "📋 Migration SQL file created at /tmp/migration.sql"
-          
-          # 方法1: 使用 psql 客户端直接连接（更可靠）
-          echo "🔧 Installing psql client..."
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-          
-          echo "🔍 Testing database connection..."
-          if pg_isready -h $CLEANED_RDS_ENDPOINT -p $RDS_PORT -U $RDS_USERNAME -d $RDS_DATABASE; then
-            echo "✅ Database is reachable"
-          else
-            echo "⚠️ Database not immediately reachable, waiting..."
-            sleep 10
-          fi
-          
-          echo "🚀 Running database migration using psql client..."
-          export PGPASSWORD="${{ secrets.DB_PASSWORD }}"
-          psql "postgresql://$RDS_USERNAME@$CLEANED_RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" -f /tmp/migration.sql
-          
-          if [ $? -eq 0 ]; then
+          echo "📋 Applying migration Job..."
+          kubectl apply -f /tmp/db-migration-job.yaml
+
+          echo "⏳ Waiting for migration to complete..."
+          if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             echo "✅ Database migration completed successfully"
             
-            # 验证表创建
-            echo "🔍 Verifying table creation..."
-            psql "postgresql://$RDS_USERNAME@$CLEANED_RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" -c "\dt"
+            # 获取迁移日志
+            echo "=== Migration Logs ==="
+            MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
+            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
+            
+            # 清理迁移 Job
+            kubectl delete job db-migration -n ${{ env.NAMESPACE }}
+            echo "✅ Migration Job cleaned up"
           else
-            echo "❌ Database migration failed"
+            echo "❌ Database migration failed or timed out"
+            
+            # 获取失败日志
+            echo "=== Migration Logs (Failed) ==="
+            MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
+            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
+            
+            # 获取 Job 详情
+            echo "=== Job Details ==="
+            kubectl describe job db-migration -n ${{ env.NAMESPACE }}
+            
+            # 获取 Pod 详情
+            if [ -n "$MIGRATION_POD" ]; then
+              echo "=== Pod Details ==="
+              kubectl describe pod $MIGRATION_POD -n ${{ env.NAMESPACE }}
+            fi
+            
+            echo "⚠️ Migration Job kept for debugging. Manual cleanup required."
             exit 1
           fi
 

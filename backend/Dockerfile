@@ -9,7 +9,7 @@ COPY package*.json ./
 RUN npm install --production --no-audit --no-fund && \
     npm cache clean --force
 
-# Copy source code
+# Copy source code and scripts
 COPY . .
 
 # Create non-root user
