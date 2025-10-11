@@ -371,10 +371,10 @@ jobs:
           echo "Backend Role ARN: $BACKEND_ROLE_ARN"
           echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
           
-          # 更新 ALB Service Account
+          # 更新 ALB Service Account - 修复：使用正确的占位符 ALB_ROLE_ARN_PLACEHOLDER
           if [ -n "$ALB_ROLE_ARN" ]; then
-            sed -i "s|arn:aws:iam::123456789012:role/comic-website-prod-alb-controller-role|$ALB_ROLE_ARN|g" k8s/service-accounts/alb-service-account.yaml
-            echo "✅ ALB Service Account updated"
+            sed -i "s|ALB_ROLE_ARN_PLACEHOLDER|$ALB_ROLE_ARN|g" k8s/service-accounts/alb-service-account.yaml
+            echo "✅ ALB Service Account updated with ARN: $ALB_ROLE_ARN"
           else
             echo "❌ ALB Role ARN is empty"
             exit 1
@@ -397,6 +397,11 @@ jobs:
           fi
           
           echo "✅ All Service Account Role ARNs updated"
+          
+          # 验证替换结果
+          echo "=== Verification ==="
+          echo "ALB Service Account ARN:"
+          grep "eks.amazonaws.com/role-arn" k8s/service-accounts/alb-service-account.yaml
 
       - name: 🗃 Create Namespace
         run: |
