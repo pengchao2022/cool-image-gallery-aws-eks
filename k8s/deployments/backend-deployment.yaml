@@ -2,107 +2,85 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend-deployment
-  namespace: comic-website
   labels:
     app: backend
-    version: v1
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: backend
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: backend
-        version: v1
     spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: backend
-        image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend:latest
+        image: placeholder-backend-image  # 会被 GitHub Actions 替换
         ports:
         - containerPort: 3000
         env:
-        - name: NODE_ENV
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: NODE_ENV
-        - name: PORT
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: PORT
-        - name: FRONTEND_URL
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: FRONTEND_URL
-        - name: DB_HOST
-          valueFrom:
-            secretKeyRef:
-              name: rds-secret
-              key: host
-        - name: DB_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: DB_PORT
-        - name: DB_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: DB_NAME
-        - name: DB_USER
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: DB_USER
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: rds-secret
-              key: password
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: backend-secrets
-              key: JWT_SECRET
-        - name: JWT_EXPIRES_IN
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: JWT_EXPIRES_IN
-        - name: AWS_REGION
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: AWS_REGION
-        - name: AWS_ACCESS_KEY_ID
-          valueFrom:
-            secretKeyRef:
-              name: backend-secrets
-              key: AWS_ACCESS_KEY_ID
-        - name: AWS_SECRET_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: backend-secrets
-              key: AWS_SECRET_ACCESS_KEY
-        - name: S3_BUCKET_NAME
-          valueFrom:
-            secretKeyRef:
-              name: backend-secrets
-              key: S3_BUCKET_NAME
+          # 数据库配置 - 从 Secret 获取
+          - name: DB_HOST
+            valueFrom:
+              secretKeyRef:
+                name: rds-secret
+                key: host
+          - name: DB_PORT
+            valueFrom:
+              secretKeyRef:
+                name: rds-secret
+                key: port
+          - name: DB_NAME
+            valueFrom:
+              secretKeyRef:
+                name: rds-secret
+                key: database
+          - name: DB_USER
+            valueFrom:
+              secretKeyRef:
+                name: rds-secret
+                key: username
+          - name: DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rds-secret
+                key: password
+          
+          # 应用配置
+          - name: NODE_ENV
+            value: "production"
+          - name: PORT
+            value: "3000"
+          - name: JWT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: backend-secret
+                key: jwt-secret
+          - name: JWT_EXPIRES_IN
+            value: "7d"
+          
+          # AWS 配置
+          - name: AWS_REGION
+            value: "us-east-1"
+          - name: S3_BUCKET_NAME
+            valueFrom:
+              secretKeyRef:
+                name: s3-secret
+                key: bucket-name
+          
+          # 前端 URL
+          - name: FRONTEND_URL
+            value: "http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
+          
+          # CORS 配置
+          - name: CORS_ORIGIN
+            value: "*"
         resources:
           requests:
             memory: "256Mi"
-            cpu: "200m"
+            cpu: "250m"
           limits:
             memory: "512Mi"
             cpu: "500m"
@@ -112,23 +90,9 @@ spec:
             port: 3000
           initialDelaySeconds: 30
           periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /health
             port: 3000
           initialDelaySeconds: 5
           periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 1
-        startupProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          failureThreshold: 3
-        envFrom:
-        - configMapRef:
-            name: backend-config

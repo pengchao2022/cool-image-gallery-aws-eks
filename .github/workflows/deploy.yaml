@@ -317,6 +317,11 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
+      - name: 🔧 Install yq for YAML processing
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod a+x /usr/local/bin/yq
+
       - name: 🔧 Update Service Account Role ARNs
         run: |
           echo "🔧 Updating Service Account Role ARNs in YAML files..."
@@ -360,6 +365,32 @@ jobs:
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: 🔧 Update Kubernetes Secrets with Real Values
+        run: |
+          echo "🔧 Updating Kubernetes secrets with real values..."
+          
+          # 更新 RDS Secret
+          echo "=== Updating RDS Secret ==="
+          RDS_HOST_B64=$(echo -n "$RDS_ENDPOINT_CLEANED" | base64 -w 0)
+          RDS_PORT_B64=$(echo -n "$RDS_PORT" | base64 -w 0)
+          RDS_DATABASE_B64=$(echo -n "$RDS_DATABASE" | base64 -w 0)
+          RDS_USERNAME_B64=$(echo -n "$RDS_USERNAME" | base64 -w 0)
+          RDS_PASSWORD_B64=$(echo -n "${{ secrets.DB_PASSWORD }}" | base64 -w 0)
+          
+          kubectl patch secret rds-secret -n ${{ env.NAMESPACE }} -p="{\"data\":{\"host\":\"$RDS_HOST_B64\",\"port\":\"$RDS_PORT_B64\",\"database\":\"$RDS_DATABASE_B64\",\"username\":\"$RDS_USERNAME_B64\",\"password\":\"$RDS_PASSWORD_B64\"}}" --dry-run=client -o yaml | kubectl apply -f -
+          
+          # 更新 Backend Secret (JWT)
+          echo "=== Updating Backend Secret ==="
+          JWT_SECRET_B64=$(echo -n "${{ secrets.JWT_SECRET }}" | base64 -w 0)
+          kubectl patch secret backend-secret -n ${{ env.NAMESPACE }} -p="{\"data\":{\"jwt-secret\":\"$JWT_SECRET_B64\"}}" --dry-run=client -o yaml | kubectl apply -f -
+          
+          # 更新 S3 Secret
+          echo "=== Updating S3 Secret ==="
+          S3_BUCKET_B64=$(echo -n "${{ secrets.S3_BUCKET_NAME }}" | base64 -w 0)
+          kubectl patch secret s3-secret -n ${{ env.NAMESPACE }} -p="{\"data\":{\"bucket-name\":\"$S3_BUCKET_B64\"}}" --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ All secrets updated with real values"
+
       - name: 🚀 Deploy using Kustomize
         run: |
           echo "🚀 Applying all manifests using Kustomize..."
@@ -379,69 +410,23 @@ jobs:
           kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }}
           echo "✅ Frontend image updated"
 
-      - name: 🎯 Set Backend Environment Variables
+      - name: 🔍 Verify Secrets Configuration
         run: |
-          echo "🎯 Setting backend environment variables..."
-          echo "RDS_ENDPOINT_CLEANED: $RDS_ENDPOINT_CLEANED"
-          echo "RDS_PORT: $RDS_PORT"
-          echo "RDS_DATABASE: $RDS_DATABASE"
-          echo "RDS_USERNAME: $RDS_USERNAME"
-          echo "DB_PASSWORD from secrets: ${{ secrets.DB_PASSWORD != '' && '***SET***' || '***EMPTY***' }}"
+          echo "🔍 Verifying secrets configuration..."
+          sleep 5
           
-          # 验证关键环境变量
-          if [ -z "$RDS_ENDPOINT_CLEANED" ]; then
-            echo "❌ ERROR: RDS_ENDPOINT_CLEANED is empty"
-            exit 1
-          fi
+          echo "=== RDS Secret Keys ==="
+          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | jq 'keys'
           
-          if [ -z "${{ secrets.DB_PASSWORD }}" ]; then
-            echo "❌ ERROR: DB_PASSWORD secret is empty"
-            echo "Please check if DB_PASSWORD is set in GitHub Secrets"
-            exit 1
-          fi
+          echo "=== Backend Secret Keys ==="
+          kubectl get secret backend-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | jq 'keys'
           
-          echo "✅ All environment variables are valid"
-          
-          # 设置数据库环境变量 - 直接使用 GitHub Secrets
-          kubectl set env deployment/backend-deployment -n ${{ env.NAMESPACE }} \
-            DB_HOST="$RDS_ENDPOINT_CLEANED" \
-            DB_PORT="$RDS_PORT" \
-            DB_NAME="$RDS_DATABASE" \
-            DB_USER="$RDS_USERNAME" \
-            DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
-          
-          echo "✅ Database environment variables set"
-          
-          # 设置其他环境变量
-          kubectl set env deployment/backend-deployment -n ${{ env.NAMESPACE }} \
-            NODE_ENV=production \
-            PORT=3000 \
-            FRONTEND_URL="$FRONTEND_URL" \
-            JWT_SECRET="${{ secrets.JWT_SECRET }}" \
-            JWT_EXPIRES_IN="7d" \
-            AWS_REGION="${{ env.AWS_REGION }}" \
-            AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
-            AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
-            S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
-          
-          echo "✅ All environment variables set successfully"
+          echo "=== S3 Secret Keys ==="
+          kubectl get secret s3-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | jq 'keys'
 
-      - name: 🔍 Verify Service Account Configurations
+      - name: 🔍 Verify Environment Variables Configuration
         run: |
-          echo "🔍 Verifying Service Account configurations..."
-          
-          echo "=== ALB Controller Service Account ==="
-          kubectl get serviceaccount -n kube-system aws-load-balancer-controller -o yaml | grep -A 2 annotations
-          
-          echo "=== Backend Service Account ==="
-          kubectl get serviceaccount -n ${{ env.NAMESPACE }} comic-backend-sa -o yaml | grep -A 2 annotations || echo "Backend Service Account not found"
-          
-          echo "=== Frontend Service Account ==="
-          kubectl get serviceaccount -n ${{ env.NAMESPACE }} comic-frontend-sa -o yaml | grep -A 2 annotations || echo "Frontend Service Account not found"
-
-      - name: 🔍 Verify Environment Variables
-        run: |
-          echo "🔍 Verifying environment variables in deployment..."
+          echo "🔍 Verifying environment variables configuration..."
           sleep 10
           
           # 检查 deployment 的环境变量配置
@@ -455,7 +440,7 @@ jobs:
           BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
           if [ -n "$BACKEND_POD" ]; then
             echo "=== Actual Pod Environment Variables ==="
-            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- env | grep -E "(DB_|NODE_ENV|PORT)" || echo "Pod not ready yet"
+            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- env | grep -E "(DB_|NODE_ENV|PORT|JWT_|AWS_|S3_)" || echo "Pod not ready yet"
           else
             echo "❌ No backend pod found"
           fi
@@ -471,7 +456,7 @@ jobs:
           " || echo "⚠️ Backend deployment timeout, continuing..."
 
           timeout 180s bash -c "
-            while ! kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; then
+            while ! kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; do
               echo '⏳ Frontend still deploying...'
               sleep 10
             done
