@@ -347,56 +347,6 @@ jobs:
           echo "  backend_image: ${{ needs.build-and-push-images.outputs.backend_image }}"
           echo "  frontend_image: ${{ needs.build-and-push-images.outputs.frontend_image }}"
 
-      - name: 🔍 Set Deployment Variables
-        run: |
-          # 直接从 job 输出设置变量
-          BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
-          FRONTEND_IMAGE="${{ needs.build-and-push-images.outputs.frontend_image }}"
-          RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
-          S3_BUCKET_REGION="${{ needs.terraform-infrastructure.outputs.s3_bucket_region }}"
-          ALB_CONTROLLER_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
-          BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
-          FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
-          
-          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
-          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
-          echo "RDS_ENDPOINT=$RDS_ENDPOINT" >> $GITHUB_ENV
-          echo "RDS_PORT=$RDS_PORT" >> $GITHUB_ENV
-          echo "RDS_USERNAME=$RDS_USERNAME" >> $GITHUB_ENV
-          echo "RDS_DATABASE=$RDS_DATABASE" >> $GITHUB_ENV
-          echo "S3_BUCKET_NAME=$S3_BUCKET_NAME" >> $GITHUB_ENV
-          echo "S3_BUCKET_REGION=$S3_BUCKET_REGION" >> $GITHUB_ENV
-          echo "ALB_CONTROLLER_ROLE_ARN=$ALB_CONTROLLER_ROLE_ARN" >> $GITHUB_ENV
-          echo "BACKEND_ROLE_ARN=$BACKEND_ROLE_ARN" >> $GITHUB_ENV
-          echo "FRONTEND_ROLE_ARN=$FRONTEND_ROLE_ARN" >> $GITHUB_ENV
-          
-          # 清理 RDS 端点（移除端口部分）
-          CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-          echo "RDS_ENDPOINT_CLEANED=$CLEANED_RDS_ENDPOINT" >> $GITHUB_ENV
-          
-          # 设置前端 URL
-          FRONTEND_URL="http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
-          echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
-
-          echo "✅ Deployment variables set:"
-          echo "  BACKEND_IMAGE: $BACKEND_IMAGE"
-          echo "  FRONTEND_IMAGE: $FRONTEND_IMAGE"
-          echo "  RDS_ENDPOINT: $RDS_ENDPOINT"
-          echo "  RDS_ENDPOINT_CLEANED: $CLEANED_RDS_ENDPOINT"
-          echo "  RDS_PORT: $RDS_PORT"
-          echo "  RDS_USERNAME: $RDS_USERNAME"
-          echo "  RDS_DATABASE: $RDS_DATABASE"
-          echo "  S3_BUCKET_NAME: $S3_BUCKET_NAME"
-          echo "  S3_BUCKET_REGION: $S3_BUCKET_REGION"
-          echo "  ALB_CONTROLLER_ROLE_ARN: $ALB_CONTROLLER_ROLE_ARN"
-          echo "  BACKEND_ROLE_ARN: $BACKEND_ROLE_ARN"
-          echo "  FRONTEND_ROLE_ARN: $FRONTEND_ROLE_ARN"
-          echo "  FRONTEND_URL: $FRONTEND_URL"
-
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
@@ -499,15 +449,16 @@ jobs:
         run: |
           echo "🔧 Updating Kubernetes secrets with real values..."
           
-          # 设置环境变量用于 envsubst
+          # 重新设置环境变量用于 envsubst
+          export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          export RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          export RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
           export JWT_SECRET="${{ secrets.JWT_SECRET }}"
           export DATABASE_URL="postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE"
-          export RDS_HOST="$RDS_ENDPOINT_CLEANED"
-          export RDS_PORT="$RDS_PORT"
-          export RDS_DATABASE="$RDS_DATABASE"
-          export RDS_USERNAME="$RDS_USERNAME"
+          export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
-          export S3_BUCKET_NAME="$S3_BUCKET_NAME"
+          export S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           export AWS_REGION="${{ env.AWS_REGION }}"
           
           echo "Environment variables set for substitution:"
@@ -546,6 +497,22 @@ jobs:
       - name: 🗃 Run Database Migrations
         run: |
           echo "🗃 Running database migrations..."
+          
+          # 重新设置正确的环境变量
+          RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          
+          echo "Database connection details:"
+          echo "Endpoint: $RDS_ENDPOINT"
+          echo "Port: $RDS_PORT"
+          echo "Username: $RDS_USERNAME"
+          echo "Database: $RDS_DATABASE"
+          
+          # 清理 RDS 端点（移除端口部分）
+          CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
+          echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
           
           # 创建迁移 SQL 文件
           cat > /tmp/migration.sql << 'EOF'
@@ -613,15 +580,15 @@ jobs:
             --rm \
             --attach \
             --command \
-            -- psql "postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" -f /migration.sql \
+            -- psql "postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$CLEANED_RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" -f /tmp/migration.sql \
             || { echo "❌ Migration failed"; exit 1; }
 
           echo "✅ Database migration completed successfully"
 
       - name: 🔄 Update Backend Image
         run: |
-          echo "🔄 Updating backend image to: $BACKEND_IMAGE"
-          kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE -n ${{ env.NAMESPACE }}
+          echo "🔄 Updating backend image to: ${{ needs.build-and-push-images.outputs.backend_image }}"
+          kubectl set image deployment/backend-deployment backend=${{ needs.build-and-push-images.outputs.backend_image }} -n ${{ env.NAMESPACE }}
           echo "✅ Backend image updated"
           
           # 等待镜像更新完成
@@ -630,8 +597,8 @@ jobs:
 
       - name: 🔄 Update Frontend Image
         run: |
-          echo "🔄 Updating frontend image to: $FRONTEND_IMAGE"
-          kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE -n ${{ env.NAMESPACE }}
+          echo "🔄 Updating frontend image to: ${{ needs.build-and-push-images.outputs.frontend_image }}"
+          kubectl set image deployment/frontend-deployment frontend=${{ needs.build-and-push-images.outputs.frontend_image }} -n ${{ env.NAMESPACE }}
           echo "✅ Frontend image updated"
 
       - name: 🔍 Verify Secrets Configuration
