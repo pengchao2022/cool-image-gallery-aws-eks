@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend-deployment
+  namespace: comic-website
   labels:
     app: backend
 spec:
@@ -17,7 +18,7 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: backend
-        image: placeholder-backend-image  # 会被 GitHub Actions 替换
+        image: placeholder-backend-image
         ports:
         - containerPort: 3000
         env:
@@ -47,7 +48,6 @@ spec:
             secretKeyRef:
               name: rds-secret
               key: password
-        
         # 应用配置
         - name: NODE_ENV
           value: "production"
@@ -60,7 +60,6 @@ spec:
               key: jwt-secret
         - name: JWT_EXPIRES_IN
           value: "7d"
-        
         # AWS 配置
         - name: AWS_REGION
           value: "us-east-1"
@@ -69,11 +68,9 @@ spec:
             secretKeyRef:
               name: s3-secret
               key: bucket-name
-        
         # 前端 URL
         - name: FRONTEND_URL
           value: "http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
-        
         # CORS 配置
         - name: CORS_ORIGIN
           value: "*"
