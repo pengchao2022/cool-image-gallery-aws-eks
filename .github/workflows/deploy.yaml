@@ -572,18 +572,33 @@ jobs:
 
           echo "📋 Migration SQL file created at /tmp/migration.sql"
           
-          # 使用 kubectl 运行一次性迁移 Pod
-          kubectl run db-migration \
-            --namespace ${{ env.NAMESPACE }} \
-            --image=postgres:15 \
-            --restart=Never \
-            --rm \
-            --attach \
-            --command \
-            -- psql "postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$CLEANED_RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" -f /tmp/migration.sql \
-            || { echo "❌ Migration failed"; exit 1; }
-
-          echo "✅ Database migration completed successfully"
+          # 方法1: 使用 psql 客户端直接连接（更可靠）
+          echo "🔧 Installing psql client..."
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          
+          echo "🔍 Testing database connection..."
+          if pg_isready -h $CLEANED_RDS_ENDPOINT -p $RDS_PORT -U $RDS_USERNAME -d $RDS_DATABASE; then
+            echo "✅ Database is reachable"
+          else
+            echo "⚠️ Database not immediately reachable, waiting..."
+            sleep 10
+          fi
+          
+          echo "🚀 Running database migration using psql client..."
+          export PGPASSWORD="${{ secrets.DB_PASSWORD }}"
+          psql "postgresql://$RDS_USERNAME@$CLEANED_RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" -f /tmp/migration.sql
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Database migration completed successfully"
+            
+            # 验证表创建
+            echo "🔍 Verifying table creation..."
+            psql "postgresql://$RDS_USERNAME@$CLEANED_RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" -c "\dt"
+          else
+            echo "❌ Database migration failed"
+            exit 1
+          fi
 
       - name: 🔄 Update Backend Image
         run: |
