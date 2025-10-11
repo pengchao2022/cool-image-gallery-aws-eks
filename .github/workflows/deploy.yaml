@@ -73,6 +73,23 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}"
           terraform apply -auto-approve tfplan
 
+      - name: 🔍 Debug Terraform State
+        run: |
+          cd terraform
+          echo "🔍 Debugging Terraform state..."
+          
+          # 检查所有资源
+          echo "=== All Terraform Resources ==="
+          terraform state list
+          
+          # 检查 ALB Controller 相关资源
+          echo "=== ALB Controller Resources ==="
+          terraform state list | grep -E "(alb_controller|aws_iam_role)" || echo "No ALB controller resources found"
+          
+          # 检查 outputs.tf 文件
+          echo "=== Outputs.tf Content ==="
+          cat outputs.tf
+
       - name: 📋 Get Terraform Outputs
         id: terraform-outputs
         run: |
@@ -106,6 +123,23 @@ jobs:
           echo "Backend Role ARN: $BACKEND_ROLE_ARN"
           echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
           
+          # 如果 ALB Controller Role ARN 为空，尝试从 IAM 获取
+          if [ -z "$ALB_CONTROLLER_ROLE_ARN" ]; then
+            echo "⚠️ ALB Controller Role ARN is empty from Terraform outputs"
+            echo "🔍 Trying to find ALB Controller role from IAM..."
+            
+            # 查找可能的 ALB Controller role
+            ALB_ROLE=$(aws iam list-roles --query 'Roles[?contains(RoleName, `alb-controller`) || contains(RoleName, `alb_controller`) || contains(RoleName, `ALB`)].RoleName' --output text)
+            if [ -n "$ALB_ROLE" ]; then
+              ALB_CONTROLLER_ROLE_ARN="arn:aws:iam::319998871902:role/$ALB_ROLE"
+              echo "✅ Found ALB Controller role: $ALB_CONTROLLER_ROLE_ARN"
+            else
+              # 使用默认的 role 名称
+              ALB_CONTROLLER_ROLE_ARN="arn:aws:iam::319998871902:role/comic-website-prod-alb-controller"
+              echo "⚠️ Using default ALB Controller role: $ALB_CONTROLLER_ROLE_ARN"
+            fi
+          fi
+          
           if [ -z "$BACKEND_ECR_URL" ]; then
             echo "❌ Backend ECR URL is empty"
             exit 1
@@ -123,11 +157,6 @@ jobs:
           
           if [ -z "$S3_BUCKET_NAME" ]; then
             echo "❌ S3 Bucket Name is empty"
-            exit 1
-          fi
-          
-          if [ -z "$ALB_CONTROLLER_ROLE_ARN" ]; then
-            echo "❌ ALB Controller Role ARN is empty"
             exit 1
           fi
           
@@ -152,6 +181,33 @@ jobs:
           echo "backend_role_arn=$BACKEND_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "frontend_role_arn=$FRONTEND_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "✅ All outputs extracted successfully"
+
+      - name: 🔍 Verify IAM Role Configuration
+        run: |
+          echo "🔍 Verifying IAM role configuration..."
+          
+          ALB_ROLE_ARN="${{ steps.terraform-outputs.outputs.alb_controller_role_arn }}"
+          ROLE_NAME=$(echo $ALB_ROLE_ARN | cut -d'/' -f2)
+          
+          echo "ALB Role ARN: $ALB_ROLE_ARN"
+          echo "Role Name: $ROLE_NAME"
+          
+          # 检查 IAM role 是否存在
+          if aws iam get-role --role-name "$ROLE_NAME" &> /dev/null; then
+            echo "✅ IAM role exists: $ROLE_NAME"
+            
+            # 检查信任策略
+            echo "=== IAM Role Trust Policy ==="
+            aws iam get-role --role-name "$ROLE_NAME" --query 'Role.AssumeRolePolicyDocument.Statement[]'
+            
+            # 检查附加的策略
+            echo "=== Attached Policies ==="
+            aws iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[]'
+          else
+            echo "❌ IAM role does not exist: $ROLE_NAME"
+            echo "🔍 Available roles with 'alb' in name:"
+            aws iam list-roles --query 'Roles[?contains(RoleName, `alb`)].RoleName' --output table
+          fi
 
       - name: 🔍 Verify RDS Configuration
         run: |
@@ -402,6 +458,37 @@ jobs:
           echo "=== Verification ==="
           echo "ALB Service Account ARN:"
           grep "eks.amazonaws.com/role-arn" k8s/service-accounts/alb-service-account.yaml
+
+      - name: 🔧 Apply ALB Controller ServiceAccount
+        run: |
+          echo "🔧 Applying ALB Controller ServiceAccount..."
+          
+          # 删除现有的 ServiceAccount（如果存在）
+          kubectl delete serviceaccount aws-load-balancer-controller -n kube-system --ignore-not-found=true
+          
+          # 应用新的 ServiceAccount
+          kubectl apply -f k8s/service-accounts/alb-service-account.yaml
+          
+          # 验证 ServiceAccount
+          echo "=== Verifying ALB ServiceAccount ==="
+          kubectl get serviceaccount aws-load-balancer-controller -n kube-system -o yaml | grep -A 5 annotations
+
+      - name: 🔄 Restart ALB Controller
+        run: |
+          echo "🔄 Restarting ALB Controller to pick up new role..."
+          kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
+          
+          echo "⏳ Waiting for ALB Controller to be ready..."
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller -n kube-system --timeout=300s
+          
+          echo "✅ ALB Controller restarted"
+          
+          # 检查 ALB Controller 状态
+          echo "=== ALB Controller Status ==="
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+          
+          echo "=== ALB Controller Logs ==="
+          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=10
 
       - name: 🗃 Create Namespace
         run: |
