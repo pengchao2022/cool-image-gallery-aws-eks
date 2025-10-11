@@ -241,8 +241,15 @@ jobs:
 
       - name: 🔄 Restart ALB Controller
         run: |
+          # 重启 ALB Controller
+          echo "🔄 Restarting ALB Controller..."
           kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller -n kube-system --timeout=300s
+          
+          # 等待部署完成
+          echo "⏳ Waiting for ALB Controller to be ready..."
+          kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=300s
+          
+          echo "✅ ALB Controller restarted successfully"
 
       - name: 🗃 Create Namespace
         run: |
