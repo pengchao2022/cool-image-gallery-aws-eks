@@ -406,61 +406,42 @@ jobs:
         run: |
           echo "🔧 Updating Kubernetes secrets with real values..."
           
-          # 删除旧的 secrets
-          kubectl delete secret rds-secret backend-secret s3-secret -n ${{ env.NAMESPACE }} --ignore-not-found
+          # 设置环境变量用于 envsubst
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          export DATABASE_URL="postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE"
+          export RDS_HOST="$RDS_ENDPOINT_CLEANED"
+          export RDS_PORT="$RDS_PORT"
+          export RDS_DATABASE="$RDS_DATABASE"
+          export RDS_USERNAME="$RDS_USERNAME"
+          export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
+          export S3_BUCKET_NAME="$S3_BUCKET_NAME"
+          export AWS_REGION="${{ env.AWS_REGION }}"
           
-          # 创建 rds-secret
-          echo "=== Creating RDS Secret ==="
-          kubectl create secret generic rds-secret -n ${{ env.NAMESPACE }} \
-            --from-literal=host="$RDS_ENDPOINT_CLEANED" \
-            --from-literal=port="$RDS_PORT" \
-            --from-literal=database="$RDS_DATABASE" \
-            --from-literal=username="$RDS_USERNAME" \
-            --from-literal=password="${{ secrets.DB_PASSWORD }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          echo "Environment variables set for substitution:"
+          echo "RDS_HOST: $RDS_HOST"
+          echo "RDS_DATABASE: $RDS_DATABASE" 
+          echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
+          echo "JWT_SECRET length: ${#JWT_SECRET} characters"
           
-          # 创建 backend-secret
-          echo "=== Creating Backend Secret ==="
-          kubectl create secret generic backend-secret -n ${{ env.NAMESPACE }} \
-            --from-literal=jwt-secret="${{ secrets.JWT_SECRET }}" \
-            --from-literal=database-url="postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          # 使用 envsubst 处理所有 Secret 文件（原地替换）
+          echo "=== Processing Secret Files ==="
           
-          # 创建 s3-secret
-          echo "=== Creating S3 Secret ==="
-          kubectl create secret generic s3-secret -n ${{ env.NAMESPACE }} \
-            --from-literal=bucket-name="$S3_BUCKET_NAME" \
-            --from-literal=aws-region="${{ env.AWS_REGION }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          # 处理 rds-secret.yaml
+          echo "Processing rds-secret.yaml"
+          envsubst < k8s/configs/rds-secret.yaml > k8s/configs/rds-secret.yaml.tmp
+          mv k8s/configs/rds-secret.yaml.tmp k8s/configs/rds-secret.yaml
           
-          echo "✅ All secrets created with real values"
-
-      - name: 🔍 Debug Database Connection Issues
-        run: |
-          echo "🔍 Debugging database connection issues..."
+          # 处理 backend-secret.yaml
+          echo "Processing backend-secret.yaml"
+          envsubst < k8s/configs/backend-secret.yaml > k8s/configs/backend-secret.yaml.tmp
+          mv k8s/configs/backend-secret.yaml.tmp k8s/configs/backend-secret.yaml
           
-          # 检查 Secrets 内容
-          echo "=== Checking Secrets Content ==="
-          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | python3 -c "import json, sys, base64; data = json.load(sys.stdin); print('RDS Secret content:'); [print(f'  {k}: {base64.b64decode(v).decode() if v else \"EMPTY\"}') for k, v in data.items()]"
+          # 处理 s3-secret.yaml
+          echo "Processing s3-secret.yaml"
+          envsubst < k8s/configs/s3-secret.yaml > k8s/configs/s3-secret.yaml.tmp
+          mv k8s/configs/s3-secret.yaml.tmp k8s/configs/s3-secret.yaml
           
-          # 检查 Pod 环境变量
-          echo "=== Checking Pod Environment Variables ==="
-          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-          if [ -n "$BACKEND_POD" ]; then
-            echo "Backend Pod: $BACKEND_POD"
-            echo "Database environment variables:"
-            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- sh -c 'printenv | grep -E "DB_|DATABASE"' || echo "No DB environment variables found"
-          else
-            echo "❌ No backend pod found"
-          fi
-
-      - name: 🔄 Force Restart Backend Pods
-        run: |
-          echo "🔄 Force restarting backend pods to reload environment variables..."
-          kubectl delete pods -n ${{ env.NAMESPACE }} -l app=backend --ignore-not-found
-          echo "✅ Backend pods deleted"
-          echo "⏳ Waiting for pods to restart..."
-          sleep 20
+          echo "✅ All secret files processed with real values"
 
       - name: 🚀 Deploy using Kustomize
         run: |
