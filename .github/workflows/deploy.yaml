@@ -30,6 +30,7 @@ jobs:
       alb_controller_role_arn: ${{ steps.terraform-outputs.outputs.alb_controller_role_arn }}
       backend_role_arn: ${{ steps.terraform-outputs.outputs.backend_role_arn }}
       frontend_role_arn: ${{ steps.terraform-outputs.outputs.frontend_role_arn }}
+      alb_url: ${{ steps.terraform-outputs.outputs.alb_url }}
 
     steps:
       - name: 🧩 Checkout code
@@ -89,6 +90,7 @@ jobs:
           ALB_CONTROLLER_ROLE_ARN=$(jq -r '.alb_controller_role_arn.value // empty' outputs.json)
           BACKEND_ROLE_ARN=$(jq -r '.backend_role_arn.value // empty' outputs.json)
           FRONTEND_ROLE_ARN=$(jq -r '.frontend_role_arn.value // empty' outputs.json)
+          ALB_URL=$(jq -r '.alb_url.value // empty' outputs.json)
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
@@ -101,6 +103,15 @@ jobs:
           echo "alb_controller_role_arn=$ALB_CONTROLLER_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "backend_role_arn=$BACKEND_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "frontend_role_arn=$FRONTEND_ROLE_ARN" >> $GITHUB_OUTPUT
+          echo "alb_url=$ALB_URL" >> $GITHUB_OUTPUT
+
+          # 显示 Terraform 输出的重要信息
+          echo "=== Terraform Outputs ==="
+          echo "Backend ECR URL: $BACKEND_ECR_URL"
+          echo "Frontend ECR URL: $FRONTEND_ECR_URL"
+          echo "RDS Endpoint: $RDS_ENDPOINT"
+          echo "S3 Bucket: $S3_BUCKET_NAME"
+          echo "ALB URL: $ALB_URL"
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -164,6 +175,7 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
+          echo "Building and pushing backend image: $BACKEND_IMAGE"
           docker build -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
@@ -174,6 +186,7 @@ jobs:
           cd frontend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
+          echo "Building and pushing frontend image: $FRONTEND_IMAGE"
           docker build -t $FRONTEND_IMAGE .
           docker push $FRONTEND_IMAGE
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
@@ -334,12 +347,42 @@ jobs:
           kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=180s
 
       - name: 🌐 Get ALB URL
+        id: get-alb-url
         run: |
+          echo "Waiting for ALB to be ready..."
           for i in {1..15}; do
-            ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-            if [ -n "$ALB_URL" ]; then
-              echo "ALB_URL=http://$ALB_URL" >> $GITHUB_ENV
+            ALB_HOSTNAME=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [ -n "$ALB_HOSTNAME" ]; then
+              echo "✅ ALB is ready!"
+              echo "ALB Hostname: $ALB_HOSTNAME"
+              echo "Application URL: http://$ALB_HOSTNAME"
+              echo "alb_url=http://$ALB_HOSTNAME" >> $GITHUB_OUTPUT
               break
+            else
+              echo "⏳ Attempt $i: ALB not ready yet, waiting 20 seconds..."
+              sleep 20
             fi
-            sleep 20
           done
+          
+          if [ -z "$ALB_HOSTNAME" ]; then
+            echo "❌ ALB failed to become ready within timeout period"
+            exit 1
+          fi
+
+      - name: 📢 Display Application URL
+        run: |
+          echo "================================================"
+          echo "🚀 APPLICATION DEPLOYMENT COMPLETE!"
+          echo "================================================"
+          echo ""
+          echo "🌐 Your application is now live at:"
+          echo "   ${{ steps.get-alb-url.outputs.alb_url }}"
+          echo ""
+          echo "📋 Additional Information:"
+          echo "   - Terraform ALB URL: ${{ needs.terraform-infrastructure.outputs.alb_url }}"
+          echo "   - Kubernetes ALB URL: ${{ steps.get-alb-url.outputs.alb_url }}"
+          echo "   - Cluster: ${{ env.CLUSTER_NAME }}"
+          echo "   - Namespace: ${{ env.NAMESPACE }}"
+          echo "   - Region: ${{ env.AWS_REGION }}"
+          echo ""
+          echo "================================================"
