@@ -17,6 +17,7 @@ resources:
   - configs/frontend-config.yaml
   - configs/rds-secret.yaml
   - configs/backend-secret.yaml
+  - configs/s3-secret.yaml
 
   # Deployments
   - deployments/backend-deployment.yaml

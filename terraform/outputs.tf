@@ -37,8 +37,6 @@ output "vpc_id" {
   value       = module.vpc.vpc_id
 }
 
-# terraform/outputs.tf
-
 # RDS 相关输出
 output "rds_endpoint" {
   description = "RDS instance endpoint"
@@ -99,3 +97,23 @@ output "frontend_role_arn" {
   value       = module.iam.app_frontend_role_arn
 }
 
+# S3 相关输出
+output "s3_bucket_name" {
+  description = "S3 bucket name for comic storage"
+  value       = module.s3.bucket_name
+}
+
+output "s3_bucket_region" {
+  description = "S3 bucket region"
+  value       = var.aws_region
+}
+
+output "s3_bucket_arn" {
+  description = "S3 bucket ARN"
+  value       = module.s3.bucket_arn
+}
+
+output "s3_bucket_domain_name" {
+  description = "S3 bucket domain name"
+  value       = module.s3.bucket_domain_name
+}
