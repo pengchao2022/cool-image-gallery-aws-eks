@@ -294,11 +294,159 @@ jobs:
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
           
-          echo "🔍 Checking file structure before build..."
+          echo "🔍 Checking file structure..."
           ls -la
-          echo "🔍 Checking scripts directory..."
-          ls -la scripts/ || echo "Scripts directory not found in current location"
           
+          # 确保 scripts 目录存在
+          if [ ! -d "scripts" ]; then
+            echo "📁 Creating scripts directory..."
+            mkdir -p scripts
+          fi
+          
+          # 创建迁移脚本
+          echo "📝 Creating migration script..."
+          cat > scripts/migrate.js << 'EOF'
+          import pg from 'pg';
+          import dotenv from 'dotenv';
+
+          // 加载环境变量
+          dotenv.config();
+
+          const { Client } = pg;
+
+          // 数据库连接配置
+          const dbConfig = {
+            host: process.env.RDS_HOST || process.env.DB_HOST,
+            port: process.env.RDS_PORT || process.env.DB_PORT || 5432,
+            user: process.env.RDS_USERNAME || process.env.DB_USERNAME,
+            password: process.env.RDS_PASSWORD || process.env.DB_PASSWORD,
+            database: process.env.RDS_DATABASE || process.env.DB_NAME,
+            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+          };
+
+          // 迁移 SQL 语句
+          const migrationSQL = `
+          -- Enable trigram extension for better text search
+          CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+          -- Create users table
+          CREATE TABLE IF NOT EXISTS users (
+              id SERIAL PRIMARY KEY,
+              username VARCHAR(50) UNIQUE NOT NULL,
+              email VARCHAR(255) UNIQUE NOT NULL,
+              password_hash VARCHAR(255) NOT NULL,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Create comics table
+          CREATE TABLE IF NOT EXISTS comics (
+              id SERIAL PRIMARY KEY,
+              title VARCHAR(255) NOT NULL,
+              description TEXT,
+              tags VARCHAR(500),
+              user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+              image_urls TEXT[] NOT NULL,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Create indexes
+          CREATE INDEX IF NOT EXISTS idx_comics_user_id ON comics(user_id);
+          CREATE INDEX IF NOT EXISTS idx_comics_created_at ON comics(created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_comics_tags ON comics USING gin(tags gin_trgm_ops);
+          CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+          -- Create updated_at trigger function
+          CREATE OR REPLACE FUNCTION update_updated_at_column()
+          RETURNS TRIGGER AS $$
+          BEGIN
+              NEW.updated_at = CURRENT_TIMESTAMP;
+              RETURN NEW;
+          END;
+          $$ language 'plpgsql';
+
+          -- Create triggers for updated_at
+          DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+          CREATE TRIGGER update_users_updated_at
+              BEFORE UPDATE ON users
+              FOR EACH ROW
+              EXECUTE FUNCTION update_updated_at_column();
+
+          DROP TRIGGER IF EXISTS update_comics_updated_at ON comics;
+          CREATE TRIGGER update_comics_updated_at
+              BEFORE UPDATE ON comics
+              FOR EACH ROW
+              EXECUTE FUNCTION update_updated_at_column();
+          `;
+
+          async function runMigration() {
+            console.log('🚀 Starting database migration...');
+            console.log('📊 Database configuration:');
+            console.log(`   Host: ${dbConfig.host}`);
+            console.log(`   Port: ${dbConfig.port}`);
+            console.log(`   Database: ${dbConfig.database}`);
+            console.log(`   User: ${dbConfig.user}`);
+            console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+
+            const client = new Client(dbConfig);
+
+            try {
+              // 连接数据库
+              console.log('🔗 Connecting to database...');
+              await client.connect();
+              console.log('✅ Connected to database successfully');
+
+              // 执行迁移
+              console.log('🗃 Running migration SQL...');
+              await client.query(migrationSQL);
+              console.log('✅ Migration completed successfully');
+
+              // 验证表创建
+              console.log('🔍 Verifying table creation...');
+              const tablesResult = await client.query(`
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_type = 'BASE TABLE'
+                ORDER BY table_name;
+              `);
+
+              console.log('📋 Created tables:');
+              tablesResult.rows.forEach(row => {
+                console.log(`   - ${row.table_name}`);
+              });
+
+              // 验证扩展
+              const extensionsResult = await client.query(`
+                SELECT extname 
+                FROM pg_extension 
+                WHERE extname = 'pg_trgm';
+              `);
+
+              if (extensionsResult.rows.length > 0) {
+                console.log('✅ pg_trgm extension enabled');
+              } else {
+                console.log('❌ pg_trgm extension not found');
+              }
+
+            } catch (error) {
+              console.error('❌ Migration failed:', error.message);
+              console.error('Error details:', error);
+              process.exit(1);
+            } finally {
+              await client.end();
+              console.log('🔒 Database connection closed');
+            }
+          }
+
+          // 如果是直接运行此脚本
+          if (import.meta.url === `file://${process.argv[1]}`) {
+            runMigration();
+          }
+          EOF
+
+          echo "✅ Migration script created"
           docker build -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
@@ -504,66 +652,12 @@ jobs:
         run: |
           echo "🗃 Running database migrations..."
           
-          # 重新设置正确的环境变量
-          RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
-          
-          echo "Database connection details:"
-          echo "Endpoint: $RDS_ENDPOINT"
-          echo "Port: $RDS_PORT"
-          echo "Username: $RDS_USERNAME"
-          echo "Database: $RDS_DATABASE"
           echo "Backend Image: $BACKEND_IMAGE"
           
-          # 清理 RDS 端点（移除端口部分）
-          CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-          echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
+          # 使用 sed 替换镜像占位符
+          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
           
-          # 方法1: 直接使用 node 命令运行迁移脚本
-          echo "📋 Creating migration Job with direct node command..."
-          cat > /tmp/db-migration-job.yaml << EOF
-          apiVersion: batch/v1
-          kind: Job
-          metadata:
-            name: db-migration
-            namespace: ${{ env.NAMESPACE }}
-          spec:
-            template:
-              metadata:
-                labels:
-                  app: db-migration
-              spec:
-                containers:
-                - name: migration
-                  image: $BACKEND_IMAGE
-                  command: ["node", "scripts/migrate.js"]
-                  env:
-                  - name: NODE_ENV
-                    value: "production"
-                  - name: RDS_HOST
-                    value: "$CLEANED_RDS_ENDPOINT"
-                  - name: RDS_PORT
-                    value: "$RDS_PORT"
-                  - name: RDS_USERNAME
-                    value: "$RDS_USERNAME"
-                  - name: RDS_PASSWORD
-                    value: "${{ secrets.DB_PASSWORD }}"
-                  - name: RDS_DATABASE
-                    value: "$RDS_DATABASE"
-                  - name: JWT_SECRET
-                    value: "${{ secrets.JWT_SECRET }}"
-                  - name: AWS_REGION
-                    value: "${{ env.AWS_REGION }}"
-                  - name: S3_BUCKET_NAME
-                    value: "${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
-                restartPolicy: Never
-            backoffLimit: 3
-            activeDeadlineSeconds: 300
-          EOF
-
           echo "🔧 Applying migration Job..."
           kubectl apply -f /tmp/db-migration-job.yaml
 
@@ -587,12 +681,6 @@ jobs:
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
             if [ -n "$MIGRATION_POD" ]; then
               kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-              
-              # 检查容器中的文件结构
-              echo "=== Checking container file structure ==="
-              kubectl exec $MIGRATION_POD -n ${{ env.NAMESPACE }} -- ls -la /app/
-              echo "=== Checking scripts directory ==="
-              kubectl exec $MIGRATION_POD -n ${{ env.NAMESPACE }} -- ls -la /app/scripts/ || echo "Scripts directory not found"
             fi
             
             # 获取 Job 详情

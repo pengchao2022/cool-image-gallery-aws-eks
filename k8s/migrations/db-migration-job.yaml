@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration
+  namespace: comic-website
+spec:
+  template:
+    metadata:
+      labels:
+        app: db-migration
+    spec:
+      containers:
+      - name: migration
+        image: PLACEHOLDER_BACKEND_IMAGE
+        command: ["node", "scripts/migrate.js"]
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: RDS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: host
+        - name: RDS_PORT
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: port
+        - name: RDS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: username
+        - name: RDS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: password
+        - name: RDS_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: database
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: backend-secret
+              key: jwt-secret
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            secretKeyRef:
+              name: s3-secret
+              key: bucket-name
+      restartPolicy: Never
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
