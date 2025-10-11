@@ -10,7 +10,8 @@ RUN npm install --production --no-audit --no-fund && \
     npm cache clean --force
 
 # Copy source code and scripts
-COPY . .
+COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \

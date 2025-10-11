@@ -293,6 +293,12 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
+          
+          echo "🔍 Checking file structure before build..."
+          ls -la
+          echo "🔍 Checking scripts directory..."
+          ls -la scripts/ || echo "Scripts directory not found in current location"
+          
           docker build -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
@@ -516,7 +522,8 @@ jobs:
           CLEANED_RDS_ENDPOINT=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           echo "Cleaned RDS Endpoint: $CLEANED_RDS_ENDPOINT"
           
-          # 创建迁移 Job YAML 文件
+          # 方法1: 直接使用 node 命令运行迁移脚本
+          echo "📋 Creating migration Job with direct node command..."
           cat > /tmp/db-migration-job.yaml << EOF
           apiVersion: batch/v1
           kind: Job
@@ -532,7 +539,7 @@ jobs:
                 containers:
                 - name: migration
                   image: $BACKEND_IMAGE
-                  command: ["npm", "run", "migrate"]
+                  command: ["node", "scripts/migrate.js"]
                   env:
                   - name: NODE_ENV
                     value: "production"
@@ -557,7 +564,7 @@ jobs:
             activeDeadlineSeconds: 300
           EOF
 
-          echo "📋 Applying migration Job..."
+          echo "🔧 Applying migration Job..."
           kubectl apply -f /tmp/db-migration-job.yaml
 
           echo "⏳ Waiting for migration to complete..."
@@ -578,17 +585,19 @@ jobs:
             # 获取失败日志
             echo "=== Migration Logs (Failed) ==="
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
-            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
+            if [ -n "$MIGRATION_POD" ]; then
+              kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
+              
+              # 检查容器中的文件结构
+              echo "=== Checking container file structure ==="
+              kubectl exec $MIGRATION_POD -n ${{ env.NAMESPACE }} -- ls -la /app/
+              echo "=== Checking scripts directory ==="
+              kubectl exec $MIGRATION_POD -n ${{ env.NAMESPACE }} -- ls -la /app/scripts/ || echo "Scripts directory not found"
+            fi
             
             # 获取 Job 详情
             echo "=== Job Details ==="
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
-            
-            # 获取 Pod 详情
-            if [ -n "$MIGRATION_POD" ]; then
-              echo "=== Pod Details ==="
-              kubectl describe pod $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            fi
             
             echo "⚠️ Migration Job kept for debugging. Manual cleanup required."
             exit 1
