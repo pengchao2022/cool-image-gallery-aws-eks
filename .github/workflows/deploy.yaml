@@ -317,93 +317,53 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔧 Configure All Service Accounts with Dynamic IAM Roles
+      - name: 🔧 Update Service Account Role ARNs
         run: |
-          echo "🔧 Configuring all Service Accounts with dynamic IAM Roles..."
+          echo "🔧 Updating Service Account Role ARNs in YAML files..."
           
-          # ALB Controller Service Account
           ALB_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
+          BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
+          FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
+          
+          echo "ALB Role ARN: $ALB_ROLE_ARN"
+          echo "Backend Role ARN: $BACKEND_ROLE_ARN"
+          echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
+          
+          # 更新 ALB Service Account
           if [ -n "$ALB_ROLE_ARN" ]; then
-            echo "📝 Configuring ALB Controller Service Account..."
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: ServiceAccount
-            metadata:
-              name: aws-load-balancer-controller
-              namespace: kube-system
-              labels:
-                app.kubernetes.io/name: aws-load-balancer-controller
-                app.kubernetes.io/component: controller
-              annotations:
-                eks.amazonaws.com/role-arn: "$ALB_ROLE_ARN"
-                eks.amazonaws.com/sts-regional-endpoints: "true"
-            EOF
-            echo "✅ ALB Controller Service Account configured"
+            sed -i "s|arn:aws:iam::123456789012:role/comic-website-prod-alb-controller-role|$ALB_ROLE_ARN|g" k8s/service-accounts/alb-service-account.yaml
+            echo "✅ ALB Service Account updated"
           else
             echo "❌ ALB Role ARN is empty"
             exit 1
           fi
           
-          # Backend Service Account
-          BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
+          # 更新 Backend Service Account
           if [ -n "$BACKEND_ROLE_ARN" ]; then
-            echo "📝 Configuring Backend Service Account..."
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: ServiceAccount
-            metadata:
-              name: comic-backend-sa
-              namespace: ${{ env.NAMESPACE }}
-              annotations:
-                eks.amazonaws.com/role-arn: "$BACKEND_ROLE_ARN"
-            EOF
-            echo "✅ Backend Service Account configured"
+            sed -i "s|arn:aws:iam::123456789012:role/comic-website-prod-app-backend-role|$BACKEND_ROLE_ARN|g" k8s/service-accounts/backend-service-account.yaml
+            echo "✅ Backend Service Account updated"
           else
-            echo "⚠️ Backend Role ARN is empty - backend may not have AWS permissions"
+            echo "⚠️ Backend Role ARN is empty - using existing value"
           fi
           
-          # Frontend Service Account
-          FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
+          # 更新 Frontend Service Account
           if [ -n "$FRONTEND_ROLE_ARN" ]; then
-            echo "📝 Configuring Frontend Service Account..."
-            kubectl apply -f - <<EOF
-            apiVersion: v1
-            kind: ServiceAccount
-            metadata:
-              name: comic-frontend-sa
-              namespace: ${{ env.NAMESPACE }}
-              annotations:
-                eks.amazonaws.com/role-arn: "$FRONTEND_ROLE_ARN"
-            EOF
-            echo "✅ Frontend Service Account configured"
+            sed -i "s|arn:aws:iam::123456789012:role/comic-website-prod-app-frontend-role|$FRONTEND_ROLE_ARN|g" k8s/service-accounts/frontend-service-account.yaml
+            echo "✅ Frontend Service Account updated"
           else
-            echo "⚠️ Frontend Role ARN is empty - frontend may not have AWS permissions"
+            echo "⚠️ Frontend Role ARN is empty - using existing value"
           fi
           
-          # 重启相关部署以应用新的 Service Account
-          echo "🔄 Restarting deployments to use new Service Accounts..."
-          kubectl rollout restart deployment -n kube-system aws-load-balancer-controller
-          kubectl rollout restart deployment -n ${{ env.NAMESPACE }} backend-deployment
-          kubectl rollout restart deployment -n ${{ env.NAMESPACE }} frontend-deployment
-          
-          echo "⏳ Waiting for deployments to be ready..."
-          kubectl rollout status deployment -n kube-system aws-load-balancer-controller --timeout=180s
-          kubectl rollout status deployment -n ${{ env.NAMESPACE }} backend-deployment --timeout=180s
-          kubectl rollout status deployment -n ${{ env.NAMESPACE }} frontend-deployment --timeout=180s
-          
-          echo "✅ All Service Accounts configured successfully"
+          echo "✅ All Service Account Role ARNs updated"
 
       - name: 🗃 Create Namespace
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: 🚀 Deploy using Kustomize (excluding Service Accounts)
+      - name: 🚀 Deploy using Kustomize
         run: |
-          echo "🚀 Applying all manifests using Kustomize (excluding Service Accounts)..."
+          echo "🚀 Applying all manifests using Kustomize..."
           cd k8s
-          
-          # 使用 Kustomize 部署除 Service Accounts 外的所有资源
-          # 因为 Service Accounts 已经在前面步骤中动态创建了
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
           echo "✅ Kustomize deployment completed"
 
