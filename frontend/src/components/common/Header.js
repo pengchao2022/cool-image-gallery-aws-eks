@@ -10,6 +10,8 @@ const Header = () => {
   const [authError, setAuthError] = useState('');
   const navigate = useNavigate();
 
+  console.log('🔍 Header渲染 - 当前用户:', currentUser);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -57,12 +59,14 @@ const Header = () => {
   };
 
   const handleLogout = () => {
+    console.log('🚪 执行退出登录');
     logout();
     navigate('/');
   };
 
-  const handleAvatarClick = () => {
-    console.log('头像被点击了，跳转到个人资料页面');
+  const handleAvatarClick = (e) => {
+    console.log('👤 头像被点击了', e);
+    e.stopPropagation(); // 阻止事件冒泡
     navigate('/profile');
   };
 
@@ -96,25 +100,48 @@ const Header = () => {
               <li><a href="#" style={{ textDecoration: 'none', color: 'inherit' }}>排行榜</a></li>
               <li><a href="#" style={{ textDecoration: 'none', color: 'inherit' }}>分类</a></li>
             </ul>
+            
             <div className="auth-buttons">
               {currentUser ? (
-                <div className="user-info" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div className="user-info" style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '15px',
+                  padding: '5px',
+                  border: '2px solid transparent',
+                  borderRadius: '8px'
+                }}>
                   <button 
                     className="btn btn-primary"
-                    onClick={() => navigate('/upload')}
-                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      console.log('📤 点击上传漫画');
+                      // 暂时先显示alert，稍后实现上传功能
+                      alert('上传功能即将开放！');
+                    }}
+                    style={{ 
+                      cursor: 'pointer',
+                      minWidth: '100px'
+                    }}
                   >
                     上传漫画
                   </button>
                   
                   {/* 头像区域 - 确保可点击 */}
                   <div 
-                    className="user-avatar"
+                    className="user-avatar-clickable"
                     onClick={handleAvatarClick}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        handleAvatarClick(e);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label="查看个人资料"
                     style={{ 
                       cursor: 'pointer',
-                      width: '45px',
-                      height: '45px',
+                      width: '50px',
+                      height: '50px',
                       borderRadius: '50%',
                       backgroundColor: 'var(--primary)',
                       display: 'flex',
@@ -122,17 +149,11 @@ const Header = () => {
                       justifyContent: 'center',
                       color: 'white',
                       fontWeight: 'bold',
-                      fontSize: '18px',
+                      fontSize: '20px',
                       transition: 'all 0.3s ease',
-                      border: '2px solid var(--primary)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.transform = 'scale(1.1)';
-                      e.target.style.boxShadow = '0 4px 12px rgba(108, 92, 231, 0.3)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.transform = 'scale(1)';
-                      e.target.style.boxShadow = 'none';
+                      border: '3px solid white',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                      userSelect: 'none'
                     }}
                     title="点击查看个人信息"
                   >
@@ -142,7 +163,10 @@ const Header = () => {
                   <button 
                     className="btn btn-outline" 
                     onClick={handleLogout}
-                    style={{ cursor: 'pointer' }}
+                    style={{ 
+                      cursor: 'pointer',
+                      minWidth: '80px'
+                    }}
                   >
                     退出
                   </button>
@@ -153,17 +177,23 @@ const Header = () => {
                     className="btn btn-outline" 
                     onClick={() => setActiveModal('login')}
                     disabled={authLoading}
-                    style={{ cursor: authLoading ? 'not-allowed' : 'pointer' }}
+                    style={{ 
+                      cursor: authLoading ? 'not-allowed' : 'pointer',
+                      minWidth: '80px'
+                    }}
                   >
-                    登录
+                    {authLoading ? '...' : '登录'}
                   </button>
                   <button 
                     className="btn btn-primary"
                     onClick={() => setActiveModal('register')}
                     disabled={authLoading}
-                    style={{ cursor: authLoading ? 'not-allowed' : 'pointer' }}
+                    style={{ 
+                      cursor: authLoading ? 'not-allowed' : 'pointer',
+                      minWidth: '80px'
+                    }}
                   >
-                    注册
+                    {authLoading ? '...' : '注册'}
                   </button>
                 </>
               )}
@@ -172,33 +202,13 @@ const Header = () => {
         </div>
       </header>
 
-      {/* 登录模态框 */}
+      {/* 模态框组件保持不变 */}
       {activeModal === 'login' && (
-        <div 
-          className="modal" 
-          style={{ 
-            display: 'flex',
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 1000,
-            justifyContent: 'center',
-            alignItems: 'center'
-          }}
-        >
+        <div className="modal" style={{ display: 'flex' }}>
           <div className="modal-content">
             <div className="modal-header">
               <h3 className="modal-title">登录账号</h3>
-              <button 
-                className="close-modal" 
-                onClick={closeModal}
-                style={{ cursor: 'pointer' }}
-              >
-                &times;
-              </button>
+              <button className="close-modal" onClick={closeModal}>&times;</button>
             </div>
             {authError && (
               <div style={{ 
@@ -237,7 +247,7 @@ const Header = () => {
               <button 
                 type="submit" 
                 className="btn btn-primary" 
-                style={{ width: '100%', cursor: authLoading ? 'not-allowed' : 'pointer' }}
+                style={{ width: '100%' }}
                 disabled={authLoading}
               >
                 {authLoading ? '登录中...' : '登录'}
@@ -259,33 +269,12 @@ const Header = () => {
         </div>
       )}
 
-      {/* 注册模态框 */}
       {activeModal === 'register' && (
-        <div 
-          className="modal" 
-          style={{ 
-            display: 'flex',
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 1000,
-            justifyContent: 'center',
-            alignItems: 'center'
-          }}
-        >
+        <div className="modal" style={{ display: 'flex' }}>
           <div className="modal-content">
             <div className="modal-header">
               <h3 className="modal-title">注册账号</h3>
-              <button 
-                className="close-modal" 
-                onClick={closeModal}
-                style={{ cursor: 'pointer' }}
-              >
-                &times;
-              </button>
+              <button className="close-modal" onClick={closeModal}>&times;</button>
             </div>
             {authError && (
               <div style={{ 
@@ -346,7 +335,7 @@ const Header = () => {
               <button 
                 type="submit" 
                 className="btn btn-primary" 
-                style={{ width: '100%', cursor: authLoading ? 'not-allowed' : 'pointer' }}
+                style={{ width: '100%' }}
                 disabled={authLoading}
               >
                 {authLoading ? '注册中...' : '注册'}

@@ -45,3 +45,63 @@
 .upload-area {
   cursor: pointer;
 }
+
+/* 强制头像可点击样式 */
+.user-avatar-clickable {
+  cursor: pointer !important;
+  width: 50px !important;
+  height: 50px !important;
+  border-radius: 50% !important;
+  background-color: var(--primary) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: white !important;
+  font-weight: bold !important;
+  font-size: 20px !important;
+  transition: all 0.3s ease !important;
+  border: 3px solid white !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+  user-select: none !important;
+  position: relative !important;
+  z-index: 10 !important;
+}
+
+.user-avatar-clickable:hover {
+  transform: scale(1.1) !important;
+  box-shadow: 0 4px 16px rgba(108, 92, 231, 0.4) !important;
+  background-color: var(--primary-dark) !important;
+}
+
+.user-avatar-clickable:active {
+  transform: scale(0.95) !important;
+}
+
+/* 确保用户信息区域不会阻挡点击 */
+.user-info {
+  position: relative;
+  z-index: 100;
+}
+
+/* 强制所有按钮光标 */
+.btn, 
+button, 
+[role="button"] {
+  cursor: pointer !important;
+}
+
+/* 导航栏确保在最上层 */
+header {
+  position: relative;
+  z-index: 1000;
+}
+
+nav {
+  position: relative;
+  z-index: 1001;
+}
+
+.auth-buttons {
+  position: relative;
+  z-index: 1002;
+}
