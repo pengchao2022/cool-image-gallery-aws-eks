@@ -7,7 +7,7 @@ resources:
   # 命名空间
   - namespaces/comic-website.yaml
 
-  # Service Accounts (现在使用模板)
+  # Service Accounts
   - service-accounts/alb-service-account.yaml
   - service-accounts/backend-service-account.yaml
   - service-accounts/frontend-service-account.yaml
@@ -31,45 +31,9 @@ resources:
   - networking/alb-ingress-class.yaml
   - networking/alb-ingress.yaml
 
-  # Migration
-  - migrations/db-migration-job.yaml
+# 移除 migrations/db-migration-job.yaml
 
-# 添加 ConfigMap 用于变量替换
-configMapGenerator:
-  - name: iam-role-config
-    literals:
-      - alb-role-arn=ALB_ROLE_ARN_PLACEHOLDER
-      - backend-role-arn=BACKEND_ROLE_ARN_PLACEHOLDER
-      - frontend-role-arn=FRONTEND_ROLE_ARN_PLACEHOLDER
-
-# 变量替换配置
-vars:
-  # ALB Controller Service Account 变量
-  - name: ALB_ROLE_ARN_PLACEHOLDER
-    objref:
-      kind: ConfigMap
-      name: iam-role-config
-      apiVersion: v1
-    fieldref:
-      fieldpath: data.alb-role-arn
-
-  # Backend Service Account 变量
-  - name: BACKEND_ROLE_ARN_PLACEHOLDER
-    objref:
-      kind: ConfigMap
-      name: iam-role-config
-      apiVersion: v1
-    fieldref:
-      fieldpath: data.backend-role-arn
-
-  # Frontend Service Account 变量
-  - name: FRONTEND_ROLE_ARN_PLACEHOLDER
-    objref:
-      kind: ConfigMap
-      name: iam-role-config
-      apiVersion: v1
-    fieldref:
-      fieldpath: data.frontend-role-arn
-
-commonLabels:
-  app.kubernetes.io/managed-by: kustomize
+# 使用 labels 替代 commonLabels
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize

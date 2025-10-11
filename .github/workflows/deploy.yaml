@@ -27,7 +27,6 @@ jobs:
       rds_database: ${{ steps.terraform-outputs.outputs.rds_database }}
       s3_bucket_name: ${{ steps.terraform-outputs.outputs.s3_bucket_name }}
       s3_bucket_region: ${{ steps.terraform-outputs.outputs.s3_bucket_region }}
-      s3_bucket_arn: ${{ steps.terraform-outputs.outputs.s3_bucket_arn }}
       alb_controller_role_arn: ${{ steps.terraform-outputs.outputs.alb_controller_role_arn }}
       backend_role_arn: ${{ steps.terraform-outputs.outputs.backend_role_arn }}
       frontend_role_arn: ${{ steps.terraform-outputs.outputs.frontend_role_arn }}
@@ -73,29 +72,10 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}"
           terraform apply -auto-approve tfplan
 
-      - name: 🔍 Debug Terraform State
-        run: |
-          cd terraform
-          echo "🔍 Debugging Terraform state..."
-          
-          # 检查所有资源
-          echo "=== All Terraform Resources ==="
-          terraform state list
-          
-          # 检查 ALB Controller 相关资源
-          echo "=== ALB Controller Resources ==="
-          terraform state list | grep -E "(alb_controller|aws_iam_role)" || echo "No ALB controller resources found"
-          
-          # 检查 outputs.tf 文件
-          echo "=== Outputs.tf Content ==="
-          cat outputs.tf
-
       - name: 📋 Get Terraform Outputs
         id: terraform-outputs
         run: |
           cd terraform
-          echo "🔍 Getting Terraform outputs..."
-          
           terraform output -json > outputs.json
           
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
@@ -106,67 +86,9 @@ jobs:
           RDS_DATABASE=$(jq -r '.rds_database_name.value // "comicdb"' outputs.json)
           S3_BUCKET_NAME=$(jq -r '.s3_bucket_name.value // empty' outputs.json)
           S3_BUCKET_REGION=$(jq -r '.s3_bucket_region.value // empty' outputs.json)
-          S3_BUCKET_ARN=$(jq -r '.s3_bucket_arn.value // empty' outputs.json)
           ALB_CONTROLLER_ROLE_ARN=$(jq -r '.alb_controller_role_arn.value // empty' outputs.json)
           BACKEND_ROLE_ARN=$(jq -r '.backend_role_arn.value // empty' outputs.json)
           FRONTEND_ROLE_ARN=$(jq -r '.frontend_role_arn.value // empty' outputs.json)
-          
-          echo "Backend ECR URL: $BACKEND_ECR_URL"
-          echo "Frontend ECR URL: $FRONTEND_ECR_URL"
-          echo "RDS Endpoint: $RDS_ENDPOINT"
-          echo "RDS Port: $RDS_PORT"
-          echo "RDS Username: $RDS_USERNAME"
-          echo "RDS Database: $RDS_DATABASE"
-          echo "S3 Bucket Name: $S3_BUCKET_NAME"
-          echo "S3 Bucket Region: $S3_BUCKET_REGION"
-          echo "ALB Controller Role ARN: $ALB_CONTROLLER_ROLE_ARN"
-          echo "Backend Role ARN: $BACKEND_ROLE_ARN"
-          echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
-          
-          # 如果 ALB Controller Role ARN 为空，尝试从 IAM 获取
-          if [ -z "$ALB_CONTROLLER_ROLE_ARN" ]; then
-            echo "⚠️ ALB Controller Role ARN is empty from Terraform outputs"
-            echo "🔍 Trying to find ALB Controller role from IAM..."
-            
-            # 查找可能的 ALB Controller role
-            ALB_ROLE=$(aws iam list-roles --query 'Roles[?contains(RoleName, `alb-controller`) || contains(RoleName, `alb_controller`) || contains(RoleName, `ALB`)].RoleName' --output text)
-            if [ -n "$ALB_ROLE" ]; then
-              ALB_CONTROLLER_ROLE_ARN="arn:aws:iam::319998871902:role/$ALB_ROLE"
-              echo "✅ Found ALB Controller role: $ALB_CONTROLLER_ROLE_ARN"
-            else
-              # 使用默认的 role 名称
-              ALB_CONTROLLER_ROLE_ARN="arn:aws:iam::319998871902:role/comic-website-prod-alb-controller"
-              echo "⚠️ Using default ALB Controller role: $ALB_CONTROLLER_ROLE_ARN"
-            fi
-          fi
-          
-          if [ -z "$BACKEND_ECR_URL" ]; then
-            echo "❌ Backend ECR URL is empty"
-            exit 1
-          fi
-          
-          if [ -z "$FRONTEND_ECR_URL" ]; then
-            echo "❌ Frontend ECR URL is empty"
-            exit 1
-          fi
-          
-          if [ -z "$RDS_ENDPOINT" ]; then
-            echo "❌ RDS Endpoint is empty"
-            exit 1
-          fi
-          
-          if [ -z "$S3_BUCKET_NAME" ]; then
-            echo "❌ S3 Bucket Name is empty"
-            exit 1
-          fi
-          
-          if [ -z "$BACKEND_ROLE_ARN" ]; then
-            echo "⚠️ Backend Role ARN is empty - backend may not have AWS permissions"
-          fi
-          
-          if [ -z "$FRONTEND_ROLE_ARN" ]; then
-            echo "⚠️ Frontend Role ARN is empty - frontend may not have AWS permissions"
-          fi
           
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
@@ -176,62 +98,13 @@ jobs:
           echo "rds_database=$RDS_DATABASE" >> $GITHUB_OUTPUT
           echo "s3_bucket_name=$S3_BUCKET_NAME" >> $GITHUB_OUTPUT
           echo "s3_bucket_region=$S3_BUCKET_REGION" >> $GITHUB_OUTPUT
-          echo "s3_bucket_arn=$S3_BUCKET_ARN" >> $GITHUB_OUTPUT
           echo "alb_controller_role_arn=$ALB_CONTROLLER_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "backend_role_arn=$BACKEND_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "frontend_role_arn=$FRONTEND_ROLE_ARN" >> $GITHUB_OUTPUT
-          echo "✅ All outputs extracted successfully"
-
-      - name: 🔍 Verify IAM Role Configuration
-        run: |
-          echo "🔍 Verifying IAM role configuration..."
-          
-          ALB_ROLE_ARN="${{ steps.terraform-outputs.outputs.alb_controller_role_arn }}"
-          ROLE_NAME=$(echo $ALB_ROLE_ARN | cut -d'/' -f2)
-          
-          echo "ALB Role ARN: $ALB_ROLE_ARN"
-          echo "Role Name: $ROLE_NAME"
-          
-          # 检查 IAM role 是否存在
-          if aws iam get-role --role-name "$ROLE_NAME" &> /dev/null; then
-            echo "✅ IAM role exists: $ROLE_NAME"
-            
-            # 检查信任策略
-            echo "=== IAM Role Trust Policy ==="
-            aws iam get-role --role-name "$ROLE_NAME" --query 'Role.AssumeRolePolicyDocument.Statement[]'
-            
-            # 检查附加的策略
-            echo "=== Attached Policies ==="
-            aws iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[]'
-          else
-            echo "❌ IAM role does not exist: $ROLE_NAME"
-            echo "🔍 Available roles with 'alb' in name:"
-            aws iam list-roles --query 'Roles[?contains(RoleName, `alb`)].RoleName' --output table
-          fi
-
-      - name: 🔍 Verify RDS Configuration
-        run: |
-          echo "🔍 Verifying RDS configuration..."
-          aws rds describe-db-instances \
-            --region ${{ env.AWS_REGION }} \
-            --query 'DBInstances[].{DBInstanceIdentifier:DBInstanceIdentifier, Status:DBInstanceStatus, Endpoint:Endpoint.Address, Port:Endpoint.Port}' \
-            --output table
-
-      - name: 🔍 Verify S3 Configuration
-        run: |
-          echo "🔍 Verifying S3 configuration..."
-          aws s3api list-buckets \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Buckets[].{Name:Name, CreationDate:CreationDate}' \
-            --output table
 
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-
-      - name: 🧰 Setup kubectl
-        run: |
-          sudo snap install kubectl --classic
 
   build-and-push-images:
     name: "Build and Push Docker Images"
@@ -247,8 +120,6 @@ jobs:
     steps:
       - name: 🧩 Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: 🔑 Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -268,7 +139,7 @@ jobs:
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-      - name: 🔍 Set ECR URLs from previous job
+      - name: 🔍 Set ECR URLs
         run: |
           echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
           echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
@@ -293,160 +164,6 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          
-          echo "🔍 Checking file structure..."
-          ls -la
-          
-          # 确保 scripts 目录存在
-          if [ ! -d "scripts" ]; then
-            echo "📁 Creating scripts directory..."
-            mkdir -p scripts
-          fi
-          
-          # 创建迁移脚本
-          echo "📝 Creating migration script..."
-          cat > scripts/migrate.js << 'EOF'
-          import pg from 'pg';
-          import dotenv from 'dotenv';
-
-          // 加载环境变量
-          dotenv.config();
-
-          const { Client } = pg;
-
-          // 数据库连接配置
-          const dbConfig = {
-            host: process.env.RDS_HOST || process.env.DB_HOST,
-            port: process.env.RDS_PORT || process.env.DB_PORT || 5432,
-            user: process.env.RDS_USERNAME || process.env.DB_USERNAME,
-            password: process.env.RDS_PASSWORD || process.env.DB_PASSWORD,
-            database: process.env.RDS_DATABASE || process.env.DB_NAME,
-            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-          };
-
-          // 迁移 SQL 语句
-          const migrationSQL = `
-          -- Enable trigram extension for better text search
-          CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
-          -- Create users table
-          CREATE TABLE IF NOT EXISTS users (
-              id SERIAL PRIMARY KEY,
-              username VARCHAR(50) UNIQUE NOT NULL,
-              email VARCHAR(255) UNIQUE NOT NULL,
-              password_hash VARCHAR(255) NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-
-          -- Create comics table
-          CREATE TABLE IF NOT EXISTS comics (
-              id SERIAL PRIMARY KEY,
-              title VARCHAR(255) NOT NULL,
-              description TEXT,
-              tags VARCHAR(500),
-              user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-              image_urls TEXT[] NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-
-          -- Create indexes
-          CREATE INDEX IF NOT EXISTS idx_comics_user_id ON comics(user_id);
-          CREATE INDEX IF NOT EXISTS idx_comics_created_at ON comics(created_at DESC);
-          CREATE INDEX IF NOT EXISTS idx_comics_tags ON comics USING gin(tags gin_trgm_ops);
-          CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
-          -- Create updated_at trigger function
-          CREATE OR REPLACE FUNCTION update_updated_at_column()
-          RETURNS TRIGGER AS $$
-          BEGIN
-              NEW.updated_at = CURRENT_TIMESTAMP;
-              RETURN NEW;
-          END;
-          $$ language 'plpgsql';
-
-          -- Create triggers for updated_at
-          DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-          CREATE TRIGGER update_users_updated_at
-              BEFORE UPDATE ON users
-              FOR EACH ROW
-              EXECUTE FUNCTION update_updated_at_column();
-
-          DROP TRIGGER IF EXISTS update_comics_updated_at ON comics;
-          CREATE TRIGGER update_comics_updated_at
-              BEFORE UPDATE ON comics
-              FOR EACH ROW
-              EXECUTE FUNCTION update_updated_at_column();
-          `;
-
-          async function runMigration() {
-            console.log('🚀 Starting database migration...');
-            console.log('📊 Database configuration:');
-            console.log(`   Host: ${dbConfig.host}`);
-            console.log(`   Port: ${dbConfig.port}`);
-            console.log(`   Database: ${dbConfig.database}`);
-            console.log(`   User: ${dbConfig.user}`);
-            console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-
-            const client = new Client(dbConfig);
-
-            try {
-              // 连接数据库
-              console.log('🔗 Connecting to database...');
-              await client.connect();
-              console.log('✅ Connected to database successfully');
-
-              // 执行迁移
-              console.log('🗃 Running migration SQL...');
-              await client.query(migrationSQL);
-              console.log('✅ Migration completed successfully');
-
-              // 验证表创建
-              console.log('🔍 Verifying table creation...');
-              const tablesResult = await client.query(`
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_type = 'BASE TABLE'
-                ORDER BY table_name;
-              `);
-
-              console.log('📋 Created tables:');
-              tablesResult.rows.forEach(row => {
-                console.log(`   - ${row.table_name}`);
-              });
-
-              // 验证扩展
-              const extensionsResult = await client.query(`
-                SELECT extname 
-                FROM pg_extension 
-                WHERE extname = 'pg_trgm';
-              `);
-
-              if (extensionsResult.rows.length > 0) {
-                console.log('✅ pg_trgm extension enabled');
-              } else {
-                console.log('❌ pg_trgm extension not found');
-              }
-
-            } catch (error) {
-              console.error('❌ Migration failed:', error.message);
-              console.error('Error details:', error);
-              process.exit(1);
-            } finally {
-              await client.end();
-              console.log('🔒 Database connection closed');
-            }
-          }
-
-          // 如果是直接运行此脚本
-          if (import.meta.url === `file://${process.argv[1]}`) {
-            runMigration();
-          }
-          EOF
-
-          echo "✅ Migration script created"
           docker build -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
@@ -481,26 +198,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔍 Debug Job Outputs
-        run: |
-          echo "🔍 Debugging job outputs..."
-          echo "terraform-infrastructure outputs:"
-          echo "  backend_ecr_url: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
-          echo "  frontend_ecr_url: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
-          echo "  rds_endpoint: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          echo "  rds_port: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          echo "  rds_username: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          echo "  rds_database: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          echo "  s3_bucket_name: ${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
-          echo "  s3_bucket_region: ${{ needs.terraform-infrastructure.outputs.s3_bucket_region }}"
-          echo "  alb_controller_role_arn: ${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
-          echo "  backend_role_arn: ${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
-          echo "  frontend_role_arn: ${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
-          
-          echo "build-and-push-images outputs:"
-          echo "  backend_image: ${{ needs.build-and-push-images.outputs.backend_image }}"
-          echo "  frontend_image: ${{ needs.build-and-push-images.outputs.frontend_image }}"
-
       - name: ☸️ Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
@@ -509,11 +206,6 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔧 Install yq for YAML processing
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod a+x /usr/local/bin/yq
-
       - name: 🔧 Install envsubst
         run: |
           sudo apt-get update
@@ -521,299 +213,97 @@ jobs:
 
       - name: 🔧 Update Service Account Role ARNs
         run: |
-          echo "🔧 Updating Service Account Role ARNs in YAML files..."
-          
           ALB_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
           BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
           FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
           
-          echo "ALB Role ARN: $ALB_ROLE_ARN"
-          echo "Backend Role ARN: $BACKEND_ROLE_ARN"
-          echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
-          
-          # 更新 ALB Service Account - 修复：使用正确的占位符 ALB_ROLE_ARN_PLACEHOLDER
-          if [ -n "$ALB_ROLE_ARN" ]; then
-            sed -i "s|ALB_ROLE_ARN_PLACEHOLDER|$ALB_ROLE_ARN|g" k8s/service-accounts/alb-service-account.yaml
-            echo "✅ ALB Service Account updated with ARN: $ALB_ROLE_ARN"
-          else
-            echo "❌ ALB Role ARN is empty"
-            exit 1
-          fi
-          
-          # 更新 Backend Service Account
-          if [ -n "$BACKEND_ROLE_ARN" ]; then
-            sed -i "s|arn:aws:iam::123456789012:role/comic-website-prod-app-backend-role|$BACKEND_ROLE_ARN|g" k8s/service-accounts/backend-service-account.yaml
-            echo "✅ Backend Service Account updated"
-          else
-            echo "⚠️ Backend Role ARN is empty - using existing value"
-          fi
-          
-          # 更新 Frontend Service Account
-          if [ -n "$FRONTEND_ROLE_ARN" ]; then
-            sed -i "s|arn:aws:iam::123456789012:role/comic-website-prod-app-frontend-role|$FRONTEND_ROLE_ARN|g" k8s/service-accounts/frontend-service-account.yaml
-            echo "✅ Frontend Service Account updated"
-          else
-            echo "⚠️ Frontend Role ARN is empty - using existing value"
-          fi
-          
-          echo "✅ All Service Account Role ARNs updated"
-          
-          # 验证替换结果
-          echo "=== Verification ==="
-          echo "ALB Service Account ARN:"
-          grep "eks.amazonaws.com/role-arn" k8s/service-accounts/alb-service-account.yaml
+          sed -i "s|ALB_ROLE_ARN_PLACEHOLDER|$ALB_ROLE_ARN|g" k8s/service-accounts/alb-service-account.yaml
+          sed -i "s|BACKEND_ROLE_ARN_PLACEHOLDER|$BACKEND_ROLE_ARN|g" k8s/service-accounts/backend-service-account.yaml
+          sed -i "s|FRONTEND_ROLE_ARN_PLACEHOLDER|$FRONTEND_ROLE_ARN|g" k8s/service-accounts/frontend-service-account.yaml
 
       - name: 🔧 Apply ALB Controller ServiceAccount
         run: |
-          echo "🔧 Applying ALB Controller ServiceAccount..."
-          
-          # 删除现有的 ServiceAccount（如果存在）
           kubectl delete serviceaccount aws-load-balancer-controller -n kube-system --ignore-not-found=true
-          
-          # 应用新的 ServiceAccount
           kubectl apply -f k8s/service-accounts/alb-service-account.yaml
-          
-          # 验证 ServiceAccount
-          echo "=== Verifying ALB ServiceAccount ==="
-          kubectl get serviceaccount aws-load-balancer-controller -n kube-system -o yaml | grep -A 5 annotations
 
       - name: 🔄 Restart ALB Controller
         run: |
-          echo "🔄 Restarting ALB Controller to pick up new role..."
           kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
-          
-          echo "⏳ Waiting for ALB Controller to be ready..."
           kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller -n kube-system --timeout=300s
-          
-          echo "✅ ALB Controller restarted"
-          
-          # 检查 ALB Controller 状态
-          echo "=== ALB Controller Status ==="
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
-          
-          echo "=== ALB Controller Logs ==="
-          # 忽略日志错误，使用 || true 防止脚本退出
-          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=10 || true
 
       - name: 🗃 Create Namespace
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: 🔧 Update Kubernetes Secrets with Real Values
+      - name: 🔧 Update Kubernetes Secrets
         run: |
-          echo "🔧 Updating Kubernetes secrets with real values..."
-          
-          # 重新设置环境变量用于 envsubst
           export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
           export RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           export RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
           export JWT_SECRET="${{ secrets.JWT_SECRET }}"
-          export DATABASE_URL="postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_ENDPOINT:$RDS_PORT/$RDS_DATABASE"
           export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
           export S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           export AWS_REGION="${{ env.AWS_REGION }}"
           
-          echo "Environment variables set for substitution:"
-          echo "RDS_HOST: $RDS_HOST"
-          echo "RDS_DATABASE: $RDS_DATABASE" 
-          echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
-          echo "JWT_SECRET length: ${#JWT_SECRET} characters"
-          
-          # 使用 envsubst 处理所有 Secret 文件（原地替换）
-          echo "=== Processing Secret Files ==="
-          
-          # 处理 rds-secret.yaml
-          echo "Processing rds-secret.yaml"
           envsubst < k8s/configs/rds-secret.yaml > k8s/configs/rds-secret.yaml.tmp
           mv k8s/configs/rds-secret.yaml.tmp k8s/configs/rds-secret.yaml
           
-          # 处理 backend-secret.yaml
-          echo "Processing backend-secret.yaml"
           envsubst < k8s/configs/backend-secret.yaml > k8s/configs/backend-secret.yaml.tmp
           mv k8s/configs/backend-secret.yaml.tmp k8s/configs/backend-secret.yaml
           
-          # 处理 s3-secret.yaml
-          echo "Processing s3-secret.yaml"
           envsubst < k8s/configs/s3-secret.yaml > k8s/configs/s3-secret.yaml.tmp
           mv k8s/configs/s3-secret.yaml.tmp k8s/configs/s3-secret.yaml
-          
-          echo "✅ All secret files processed with real values"
 
       - name: 🚀 Deploy using Kustomize
         run: |
-          echo "🚀 Applying all manifests using Kustomize..."
           cd k8s
           kubectl apply -k . --namespace ${{ env.NAMESPACE }}
-          echo "✅ Kustomize deployment completed"
+
+      - name: 🧹 Clean Up Existing Migration Job
+        run: |
+          kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          sleep 5
 
       - name: 🗃 Run Database Migrations
         run: |
-          echo "🗃 Running database migrations..."
-          
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
-          echo "Backend Image: $BACKEND_IMAGE"
-          
-          # 使用 sed 替换镜像占位符
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
-          
-          echo "🔧 Applying migration Job..."
           kubectl apply -f /tmp/db-migration-job.yaml
 
-          echo "⏳ Waiting for migration to complete..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Database migration completed successfully"
-            
-            # 获取迁移日志
-            echo "=== Migration Logs ==="
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            
-            # 清理迁移 Job
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
-            echo "✅ Migration Job cleaned up"
           else
-            echo "❌ Database migration failed or timed out"
-            
-            # 获取失败日志
-            echo "=== Migration Logs (Failed) ==="
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
-            if [ -n "$MIGRATION_POD" ]; then
-              kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            fi
-            
-            # 获取 Job 详情
-            echo "=== Job Details ==="
+            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
-            
-            echo "⚠️ Migration Job kept for debugging. Manual cleanup required."
             exit 1
           fi
 
       - name: 🔄 Update Backend Image
         run: |
-          echo "🔄 Updating backend image to: ${{ needs.build-and-push-images.outputs.backend_image }}"
           kubectl set image deployment/backend-deployment backend=${{ needs.build-and-push-images.outputs.backend_image }} -n ${{ env.NAMESPACE }}
-          echo "✅ Backend image updated"
-          
-          # 等待镜像更新完成
-          echo "⏳ Waiting for backend image update to complete..."
           kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
 
       - name: 🔄 Update Frontend Image
         run: |
-          echo "🔄 Updating frontend image to: ${{ needs.build-and-push-images.outputs.frontend_image }}"
           kubectl set image deployment/frontend-deployment frontend=${{ needs.build-and-push-images.outputs.frontend_image }} -n ${{ env.NAMESPACE }}
-          echo "✅ Frontend image updated"
-
-      - name: 🔍 Verify Secrets Configuration
-        run: |
-          echo "🔍 Verifying secrets configuration..."
-          sleep 5
-          
-          echo "=== RDS Secret Keys ==="
-          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | python3 -c "import json, sys; data = json.load(sys.stdin); print('Keys:', list(data.keys()))"
-          
-          echo "=== Backend Secret Keys ==="
-          kubectl get secret backend-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | python3 -c "import json, sys; data = json.load(sys.stdin); print('Keys:', list(data.keys()))"
-          
-          echo "=== S3 Secret Keys ==="
-          kubectl get secret s3-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data}' | python3 -c "import json, sys; data = json.load(sys.stdin); print('Keys:', list(data.keys()))"
-
-      - name: 🔍 Verify Environment Variables Configuration
-        run: |
-          echo "🔍 Verifying environment variables configuration..."
-          sleep 10
-          
-          # 检查 deployment 的环境变量配置
-          echo "=== Deployment Environment Variables ==="
-          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].env}' | python3 -c "import json, sys; data = json.load(sys.stdin); print(json.dumps(data, indent=2))"
-          
-          # 等待 pod 启动并检查实际环境变量
-          echo "=== Waiting for pod to be ready ==="
-          kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=120s || true
-          
-          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-          if [ -n "$BACKEND_POD" ]; then
-            echo "=== Actual Pod Environment Variables ==="
-            kubectl exec $BACKEND_POD -n ${{ env.NAMESPACE }} -- env | grep -E "(DB_|NODE_ENV|PORT|JWT_|AWS_|S3_)" || echo "Pod not ready yet"
-          else
-            echo "❌ No backend pod found"
-          fi
 
       - name: ⏳ Wait for Deployments
         run: |
-          echo "🔎 Waiting for deployments to be ready..."
-          timeout 300s bash -c "
-            while ! kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; do
-              echo '⏳ Backend still deploying...'
-              sleep 10
-            done
-          " || echo "⚠️ Backend deployment timeout, continuing..."
-
-          timeout 180s bash -c "
-            while ! kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=60s 2>/dev/null; do
-              echo '⏳ Frontend still deploying...'
-              sleep 10
-            done
-          " || echo "⚠️ Frontend deployment timeout, continuing..."
-
-      - name: 🌐 Check ALB Controller Status
-        run: |
-          echo "🌐 Checking ALB Controller status..."
-          echo "=== ALB Controller Pods ==="
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
-          
-          echo "=== ALB Controller Logs ==="
-          # 忽略日志错误
-          kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=20 || true
-          
-          echo "=== Ingress Status ==="
-          kubectl get ingress -n ${{ env.NAMESPACE }} -o wide
-
-      - name: 📊 Final Deployment Status
-        run: |
-          echo "📊 Final deployment status:"
-          kubectl get pods -n ${{ env.NAMESPACE }}
-          
-          echo -e "\n📋 Services:"
-          kubectl get svc -n ${{ env.NAMESPACE }}
-          
-          echo -e "\n🌐 Ingress:"
-          kubectl get ingress -n ${{ env.NAMESPACE }} -o yaml | grep -A 10 "status:"
-
-      - name: 🔍 Check Application Logs
-        run: |
-          echo "🔍 Checking backend logs..."
-          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-          if [ -n "$BACKEND_POD" ]; then
-            echo "=== Backend Logs ==="
-            kubectl logs $BACKEND_POD -n ${{ env.NAMESPACE }} --tail=50 || true
-          else
-            echo "❌ No backend pod found"
-          fi
+          kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
+          kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=180s
 
       - name: 🌐 Get ALB URL
         run: |
-          echo "🚀 Retrieving ALB URL..."
           for i in {1..15}; do
             ALB_URL=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB_URL" ]; then
-              echo "✅ ALB is ready: http://$ALB_URL"
               echo "ALB_URL=http://$ALB_URL" >> $GITHUB_ENV
               break
             fi
-            echo "⏳ ALB not ready yet (attempt $i/15)..."
             sleep 20
           done
-          
-          if [ -z "$ALB_URL" ]; then
-            echo "❌ ALB creation failed after 15 attempts"
-            echo "🔍 Checking ALB Controller logs for details..."
-
-            kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=50 || true
-            echo "🔍 Checking Ingress events..."
-            kubectl describe ingress comic-website-ingress -n ${{ env.NAMESPACE }}
-            exit 1
-          fi
