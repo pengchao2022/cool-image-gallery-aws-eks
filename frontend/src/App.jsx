@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext.jsx'
 import Header from './components/common/Header.jsx'
@@ -10,10 +10,22 @@ import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import './App.css'
 
-// 保护路由组件
+// 修复的 ProtectedRoute 组件
 const ProtectedRoute = ({ children }) => {
-  const token = localStorage.getItem('token')
-  return token ? children : <Navigate to="/login" />
+  const [isAuthenticated, setIsAuthenticated] = useState(null)
+  
+  useEffect(() => {
+    const token = localStorage.getItem('authToken')
+    console.log('🛡️ ProtectedRoute 检查: token =', token)
+    setIsAuthenticated(!!token)
+  }, [])
+
+  if (isAuthenticated === null) {
+    return <div>Loading...</div>
+  }
+
+  console.log('🛡️ ProtectedRoute 结果:', isAuthenticated ? '允许访问' : '重定向到登录')
+  return isAuthenticated ? children : <Navigate to="/login" replace />
 }
 
 function App() {
