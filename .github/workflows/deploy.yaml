@@ -344,18 +344,33 @@ jobs:
         run: |
           echo "🚀 Running database migrations..."
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
+          
+          # 创建临时的 migration job 文件
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
+          
+          # 应用 migration job
           kubectl apply -f /tmp/db-migration-job.yaml
 
+          # 等待迁移完成
+          echo "⏳ Waiting for database migration to complete..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
             echo "✅ Migration completed successfully"
+            echo "=== Migration Logs ==="
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
+            
+            # 验证 role 字段是否存在
+            echo "=== Verifying role column ==="
+            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }} | grep -i "role" || echo "⚠️  No role-related output in logs"
+            
+            # 清理 migration job
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
             echo "❌ Migration failed"
+            echo "=== Migration Logs ==="
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
+            echo "=== Job Description ==="
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
             exit 1
           fi

@@ -1,13 +1,13 @@
 -- Enable trigram extension for better text search
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
--- Create users table
+-- 修改 users 表创建语句，添加 role 字段
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(20) DEFAULT 'user',  -- 新增 role 字段
+    role VARCHAR(20) DEFAULT 'user',  -- 添加这行
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
