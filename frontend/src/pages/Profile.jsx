@@ -1,18 +1,52 @@
-import React, { useContext, useState } from 'react';
-import { AuthContext } from '../context/AuthContext';
-import '../App.css';
+import React, { useContext, useState, useEffect } from 'react'
+import { AuthContext } from '../context/AuthContext.jsx'
+import { useNavigate } from 'react-router-dom'
+import api from '../services/api.jsx'
+import '../App.css'
 
 const Profile = () => {
-  const { currentUser, logout } = useContext(AuthContext);
-  const [activeTab, setActiveTab] = useState('info');
+  const { currentUser, logout } = useContext(AuthContext)
+  const [activeTab, setActiveTab] = useState('info')
+  const [userComics, setUserComics] = useState([])
+  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (currentUser && activeTab === 'comics') {
+      fetchUserComics()
+    }
+  }, [currentUser, activeTab])
+
+  const fetchUserComics = async () => {
+    try {
+      setLoading(true)
+      // 模拟获取用户漫画数据
+      setTimeout(() => {
+        setUserComics([
+          { id: 1, title: "我的第一部漫画", image_url: "https://picsum.photos/300/200?random=10", created_at: new Date().toISOString() },
+          { id: 2, title: "奇幻冒险", image_url: "https://picsum.photos/300/200?random=11", created_at: new Date().toISOString() }
+        ])
+        setLoading(false)
+      }, 1000)
+    } catch (error) {
+      console.error('获取用户漫画失败:', error)
+      setLoading(false)
+    }
+  }
 
   if (!currentUser) {
     return (
       <div className="container" style={{ padding: '50px 0', textAlign: 'center' }}>
         <h2>请先登录</h2>
         <p>您需要登录才能查看个人信息</p>
+        <button 
+          className="btn btn-primary"
+          onClick={() => navigate('/')}
+        >
+          返回首页
+        </button>
       </div>
-    );
+    )
   }
 
   return (
@@ -39,7 +73,7 @@ const Profile = () => {
           fontWeight: 'bold',
           marginRight: '30px'
         }}>
-          {currentUser.avatar}
+          {currentUser.username?.[0]?.toUpperCase() || 'U'}
         </div>
         <div>
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
@@ -99,25 +133,6 @@ const Profile = () => {
                 >
                   <i className="fas fa-book" style={{ marginRight: '10px' }}></i>
                   我的漫画
-                </button>
-              </li>
-              <li style={{ marginBottom: '10px' }}>
-                <button
-                  onClick={() => setActiveTab('settings')}
-                  style={{
-                    width: '100%',
-                    padding: '12px 15px',
-                    textAlign: 'left',
-                    background: activeTab === 'settings' ? 'var(--primary)' : 'transparent',
-                    color: activeTab === 'settings' ? 'white' : 'var(--dark)',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s'
-                  }}
-                >
-                  <i className="fas fa-cog" style={{ marginRight: '10px' }}></i>
-                  账户设置
                 </button>
               </li>
               <li>
@@ -180,46 +195,49 @@ const Profile = () => {
           {activeTab === 'comics' && (
             <div className="comics-tab">
               <h2 style={{ marginBottom: '20px', color: 'var(--primary)' }}>我的漫画</h2>
-              <p style={{ color: '#666', textAlign: 'center', padding: '40px' }}>
-                您还没有上传任何漫画作品
-              </p>
-            </div>
-          )}
-
-          {activeTab === 'settings' && (
-            <div className="settings-tab">
-              <h2 style={{ marginBottom: '20px', color: 'var(--primary)' }}>账户设置</h2>
-              <form style={{ maxWidth: '400px' }}>
-                <div className="form-group">
-                  <label htmlFor="username" style={{ fontWeight: 'bold', color: '#666' }}>用户名</label>
-                  <input
-                    type="text"
-                    id="username"
-                    className="form-control"
-                    defaultValue={currentUser.username}
-                    style={{ marginTop: '5px' }}
-                  />
+              {loading ? (
+                <div style={{ textAlign: 'center', padding: '40px' }}>
+                  <i className="fas fa-spinner fa-spin"></i>
+                  <p>加载中...</p>
                 </div>
-                <div className="form-group">
-                  <label htmlFor="email" style={{ fontWeight: 'bold', color: '#666' }}>邮箱地址</label>
-                  <input
-                    type="email"
-                    id="email"
-                    className="form-control"
-                    defaultValue={currentUser.email}
-                    style={{ marginTop: '5px' }}
-                  />
+              ) : userComics.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                  <i className="fas fa-book" style={{ fontSize: '3rem', marginBottom: '20px' }}></i>
+                  <h3>您还没有上传任何漫画作品</h3>
+                  <p>点击右上角的"上传漫画"开始创作吧！</p>
+                  <button 
+                    className="btn btn-primary"
+                    onClick={() => navigate('/upload')}
+                    style={{ marginTop: '20px' }}
+                  >
+                    去上传
+                  </button>
                 </div>
-                <button type="submit" className="btn btn-primary" style={{ marginTop: '20px' }}>
-                  保存更改
-                </button>
-              </form>
+              ) : (
+                <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+                  {userComics.map(comic => (
+                    <div key={comic.id} className="comic-card">
+                      <img 
+                        src={comic.image_url} 
+                        alt={comic.title} 
+                        className="comic-image"
+                      />
+                      <div className="comic-info">
+                        <div className="comic-title">{comic.title}</div>
+                        <div className="comic-date" style={{ fontSize: '0.8rem', color: '#999' }}>
+                          {new Date(comic.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Profile;
+export default Profile

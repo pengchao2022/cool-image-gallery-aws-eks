@@ -1,10 +1,10 @@
-import React, { useContext } from 'react';
-import { Link } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
-import './Home.css';
+import React, { useContext } from 'react'
+import { Link } from 'react-router-dom'
+import { AuthContext } from '../context/AuthContext.jsx'
+import './Home.css'
 
 const Home = () => {
-  const { currentUser } = useContext(AuthContext);
+  const { currentUser } = useContext(AuthContext)
 
   return (
     <div className="home-page">
@@ -69,27 +69,15 @@ const Home = () => {
           <h2>热门漫画</h2>
           <p>探索社区中最受欢迎的作品</p>
           <div className="preview-grid">
-            <div className="preview-card">
-              <div className="preview-image"></div>
-              <div className="preview-info">
-                <h4>奇幻冒险</h4>
-                <p>作者: 漫画家A</p>
+            {[1, 2, 3, 4, 5, 6].map((item) => (
+              <div key={item} className="preview-card">
+                <div className="preview-image"></div>
+                <div className="preview-info">
+                  <h4>漫画作品 {item}</h4>
+                  <p>作者: 漫画家{item}</p>
+                </div>
               </div>
-            </div>
-            <div className="preview-card">
-              <div className="preview-image"></div>
-              <div className="preview-info">
-                <h4>科幻未来</h4>
-                <p>作者: 漫画家B</p>
-              </div>
-            </div>
-            <div className="preview-card">
-              <div className="preview-image"></div>
-              <div className="preview-info">
-                <h4>校园生活</h4>
-                <p>作者: 漫画家C</p>
-              </div>
-            </div>
+            ))}
           </div>
           <div className="preview-actions">
             <Link to="/browse" className="btn btn-primary">
@@ -99,7 +87,7 @@ const Home = () => {
         </div>
       </section>
     </div>
-  );
-};
+  )
+}
 
-export default Home;
+export default Home
