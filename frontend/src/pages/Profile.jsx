@@ -10,35 +10,83 @@ const Profile = () => {
   const [activeTab, setActiveTab] = useState('info')
   const [userComics, setUserComics] = useState([])
   const [loading, setLoading] = useState(false)
-  const [userDetails, setUserDetails] = useState(null)
+  const [registrationDate, setRegistrationDate] = useState('加载中...')
   const navigate = useNavigate()
 
-  // 调试：打印 currentUser 内容
+  // 获取用户注册时间
   useEffect(() => {
-    console.log('🔍 currentUser 对象:', currentUser)
     if (currentUser) {
-      console.log('📋 currentUser 所有属性:', Object.keys(currentUser))
-      console.log('⏰ 注册时间字段:', currentUser.created_at || '未找到')
+      fetchRegistrationDate()
     }
   }, [currentUser])
 
-  // 时间转换函数 - UTC 转北京时间
-  const formatToBeijingTime = (utcTime) => {
-    if (!utcTime) {
-      return '未知时间'
+  const fetchRegistrationDate = async () => {
+    try {
+      console.log('🔄 获取用户注册时间...')
+      
+      // 方法1: 直接查询数据库获取注册时间
+      const response = await fetch(`/api/users/${currentUser.id}/registration-date`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        if (data.created_at) {
+          const beijingTime = formatToBeijingTime(data.created_at)
+          setRegistrationDate(beijingTime)
+          return
+        }
+      }
+      
+      // 方法2: 如果上面的 API 不存在，使用备选方案
+      await fetchRegistrationDateAlternative()
+      
+    } catch (error) {
+      console.error('❌ 获取注册时间失败:', error)
+      await fetchRegistrationDateAlternative()
     }
+  }
+
+  const fetchRegistrationDateAlternative = async () => {
+    try {
+      // 备选方案：直接查询用户表获取完整用户信息
+      const response = await fetch(`/api/users/${currentUser.id}`)
+      
+      if (response.ok) {
+        const userData = await response.json()
+        console.log('✅ 用户完整数据:', userData)
+        
+        // 查找可能的注册时间字段
+        const dateFields = ['created_at', 'createdAt', 'registration_date', 'created', 'join_date']
+        for (const field of dateFields) {
+          if (userData[field]) {
+            const beijingTime = formatToBeijingTime(userData[field])
+            setRegistrationDate(beijingTime)
+            return
+          }
+        }
+      }
+      
+      // 如果还是找不到，显示基于用户ID的估算时间
+      setRegistrationDate(estimateRegistrationDate(currentUser.id))
+      
+    } catch (error) {
+      console.error('❌ 备选方案也失败:', error)
+      setRegistrationDate(estimateRegistrationDate(currentUser.id))
+    }
+  }
+
+  // 时间转换函数
+  const formatToBeijingTime = (utcTime) => {
+    if (!utcTime) return '未知时间'
     
     try {
       const date = new Date(utcTime)
       
-      // 检查日期是否有效
       if (isNaN(date.getTime())) {
         return '无效时间格式'
       }
       
       // 转换为北京时间 (UTC+8)
       const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
-      // 格式化为 YYYY-MM-DD
       return beijingTime.toISOString().split('T')[0]
     } catch (error) {
       console.error('时间转换错误:', error)
@@ -46,50 +94,15 @@ const Profile = () => {
     }
   }
 
-  // 获取注册时间的函数
-  const getRegistrationDate = () => {
-    // 首先尝试从 userDetails 获取
-    if (userDetails?.created_at) {
-      return formatToBeijingTime(userDetails.created_at)
-    }
+  // 基于用户ID估算注册时间（临时方案）
+  const estimateRegistrationDate = (userId) => {
+    // 这是一个临时方案，根据用户ID估算大致注册时间
+    // 你可以根据实际情况调整这个逻辑
+    const baseDate = new Date('2024-01-01')
+    const estimatedDate = new Date(baseDate.getTime() + (userId - 1) * 24 * 60 * 60 * 1000) // 假设每天注册几个用户
     
-    // 然后尝试从 currentUser 获取
-    if (currentUser?.created_at) {
-      return formatToBeijingTime(currentUser.created_at)
-    }
-    
-    // 如果都没有，尝试其他可能的字段名
-    const possibleDateFields = ['registrationDate', 'createdAt', 'join_date', 'registered_at', 'created']
-    for (const field of possibleDateFields) {
-      if (currentUser?.[field]) {
-        console.log(`✅ 找到注册时间字段: ${field}`, currentUser[field])
-        return formatToBeijingTime(currentUser[field])
-      }
-    }
-    
-    // 如果还是找不到，显示提示信息
-    return '注册时间暂不可用'
-  }
-
-  // 获取用户详细信息
-  useEffect(() => {
-    if (currentUser) {
-      fetchUserDetails()
-    }
-  }, [currentUser])
-
-  const fetchUserDetails = async () => {
-    try {
-      console.log('🔄 尝试获取用户详情...')
-      // 尝试从 API 获取用户详细信息
-      const response = await api.get(`/users/${currentUser.id}`)
-      console.log('✅ 用户详情响应:', response.data)
-      setUserDetails(response.data)
-    } catch (error) {
-      console.error('❌ 获取用户详情失败:', error)
-      // 如果 API 不可用，使用当前用户信息
-      setUserDetails(currentUser)
-    }
+    const beijingTime = new Date(estimatedDate.getTime() + 8 * 60 * 60 * 1000)
+    return beijingTime.toISOString().split('T')[0] + ' (估算)'
   }
 
   useEffect(() => {
@@ -117,7 +130,7 @@ const Profile = () => {
 
   const handleLogout = () => {
     logout()
-    navigate('/', { replace: true }) // 退出后重定向到首页
+    navigate('/', { replace: true })
   }
 
   if (!currentUser) {
@@ -134,9 +147,6 @@ const Profile = () => {
       </div>
     )
   }
-
-  // 获取显示的注册时间
-  const displayRegistrationDate = getRegistrationDate()
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -167,7 +177,7 @@ const Profile = () => {
         <div>
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
           <p style={{ color: '#666', marginBottom: '5px' }}>邮箱: {currentUser.email}</p>
-          <p style={{ color: '#666' }}>注册时间: {displayRegistrationDate}</p>
+          <p style={{ color: '#666' }}>注册时间: {registrationDate}</p>
         </div>
       </div>
 
@@ -226,7 +236,7 @@ const Profile = () => {
               </li>
               <li>
                 <button
-                  onClick={handleLogout} // 使用新的退出处理函数
+                  onClick={handleLogout}
                   style={{
                     width: '100%',
                     padding: '12px 15px',
@@ -275,7 +285,7 @@ const Profile = () => {
                 </div>
                 <div className="info-item">
                   <label style={{ fontWeight: 'bold', color: '#666', display: 'block', marginBottom: '5px' }}>注册时间</label>
-                  <p style={{ fontSize: '1.1rem' }}>{displayRegistrationDate}</p>
+                  <p style={{ fontSize: '1.1rem' }}>{registrationDate}</p>
                 </div>
               </div>
             </div>
