@@ -1,7 +1,7 @@
 // src/services/api.jsx
 
 // 使用 Vite 环境变量，如果没有设置则使用默认值
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://backend-service.comic-website.svc.cluster.local:3000/api'
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
 // 通用请求函数
 async function request(endpoint, options = {}) {
