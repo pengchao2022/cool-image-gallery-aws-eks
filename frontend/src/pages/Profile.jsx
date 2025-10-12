@@ -12,6 +12,44 @@ const Profile = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
+  // 新增：UTC 时间转北京时间函数
+  const formatToBeijingTime = (utcTime) => {
+    if (!utcTime) return '未知时间'
+    
+    try {
+      const date = new Date(utcTime)
+      // 转换为北京时间 (UTC+8)
+      const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
+      // 格式化为 YYYY-MM-DD
+      return beijingTime.toISOString().split('T')[0]
+    } catch (error) {
+      console.error('时间转换错误:', error)
+      return '时间格式错误'
+    }
+  }
+
+  // 新增：从 API 获取用户详细信息（包含注册时间）
+  const [userDetails, setUserDetails] = useState(null)
+  
+  useEffect(() => {
+    if (currentUser) {
+      fetchUserDetails()
+    }
+  }, [currentUser])
+
+  const fetchUserDetails = async () => {
+    try {
+      // 这里调用你的用户详情 API
+      // 假设你的 API 返回包含 created_at 字段的用户信息
+      const response = await api.get(`/users/${currentUser.id}`)
+      setUserDetails(response.data)
+    } catch (error) {
+      console.error('获取用户详情失败:', error)
+      // 如果 API 不可用，使用当前用户信息
+      setUserDetails(currentUser)
+    }
+  }
+
   useEffect(() => {
     if (currentUser && activeTab === 'comics') {
       fetchUserComics()
@@ -37,7 +75,7 @@ const Profile = () => {
 
   const handleLogout = () => {
     logout()
-    navigate('/', { replace: true }) // 退出后重定向到首页
+    navigate('/', { replace: true })
   }
 
   if (!currentUser) {
@@ -54,6 +92,9 @@ const Profile = () => {
       </div>
     )
   }
+
+  // 获取注册时间（优先使用 userDetails，回退到 currentUser）
+  const registrationDate = userDetails?.created_at || currentUser.created_at
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -84,7 +125,7 @@ const Profile = () => {
         <div>
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
           <p style={{ color: '#666', marginBottom: '5px' }}>邮箱: {currentUser.email}</p>
-          <p style={{ color: '#666' }}>注册用户</p>
+          <p style={{ color: '#666' }}>注册时间: {formatToBeijingTime(registrationDate)}</p>
         </div>
       </div>
 
@@ -143,7 +184,7 @@ const Profile = () => {
               </li>
               <li>
                 <button
-                  onClick={handleLogout} // 使用新的退出处理函数
+                  onClick={handleLogout}
                   style={{
                     width: '100%',
                     padding: '12px 15px',
@@ -192,7 +233,7 @@ const Profile = () => {
                 </div>
                 <div className="info-item">
                   <label style={{ fontWeight: 'bold', color: '#666', display: 'block', marginBottom: '5px' }}>注册时间</label>
-                  <p style={{ fontSize: '1.1rem' }}>{currentUser.registrationDate || '2024-01-01'}</p>
+                  <p style={{ fontSize: '1.1rem' }}>{formatToBeijingTime(registrationDate)}</p>
                 </div>
               </div>
             </div>
@@ -231,7 +272,7 @@ const Profile = () => {
                       <div className="comic-info">
                         <div className="comic-title">{comic.title}</div>
                         <div className="comic-date" style={{ fontSize: '0.8rem', color: '#999' }}>
-                          {new Date(comic.created_at).toLocaleDateString()}
+                          {formatToBeijingTime(comic.created_at)}
                         </div>
                       </div>
                     </div>
