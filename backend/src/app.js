@@ -32,10 +32,16 @@ app.use(compression());
 // Logging
 app.use(morgan('combined'));
 
-// CORS
+// CORS - 修改这部分
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:3000',
+    'http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com',
+    'https://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Body parsing middleware
