@@ -4,7 +4,7 @@ import { AuthContext } from '../context/AuthContext.jsx'
 import './Auth.css'
 
 const Register = () => {
-  const { register, currentUser } = useContext(AuthContext)
+  const { register } = useContext(AuthContext)
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -20,7 +20,6 @@ const Register = () => {
       ...formData,
       [e.target.name]: e.target.value
     })
-    // 清除错误信息当用户开始输入时
     if (error) setError('')
   }
 
@@ -29,9 +28,7 @@ const Register = () => {
     setLoading(true)
     setError('')
 
-    console.log('🔄 1. 开始注册流程 - 表单验证')
-
-    // 增强表单验证
+    // 表单验证
     if (!formData.username.trim()) {
       setError('请输入用户名')
       setLoading(false)
@@ -62,7 +59,6 @@ const Register = () => {
       return
     }
 
-    // 邮箱格式验证
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(formData.email)) {
       setError('请输入有效的邮箱地址')
@@ -71,99 +67,34 @@ const Register = () => {
     }
 
     try {
-      console.log('🔄 2. 表单验证通过，开始调用注册API')
-      console.log('📝 注册数据:', { username: formData.username, email: formData.email })
+      console.log('🔄 开始注册...')
       
       // 调用注册函数
       const result = await register(formData.username, formData.email, formData.password)
-      console.log('✅ 3. 注册API调用成功，返回结果:', result)
+      console.log('✅ 注册成功:', result)
 
-      // 检查 localStorage 中的认证状态
-      const token = localStorage.getItem('authToken')
-      const user = localStorage.getItem('user')
-      
-      console.log('🔐 4. 注册后认证状态检查:')
-      console.log('   Token:', token ? '存在' : '不存在')
-      console.log('   User:', user ? '存在' : '不存在')
-      console.log('   Token 值:', token)
-      console.log('   User 值:', user)
-      
-      // 检查 currentUser 状态
-      console.log('👤 5. AuthContext currentUser:', currentUser)
-
-      // 注册成功后的处理 - 修复条件判断
-      console.log('🔍 6. 检查注册结果条件:')
-      console.log('   result.token:', result?.token)
-      console.log('   result.user:', result?.user)
-      console.log('   token && user:', token && user)
-
-      // 修复：使用 token 和 user 存在作为成功条件，而不是 result.success
-      if (result && result.token && result.user) {
-        console.log('✅ 7. 条件1: result && result.token && result.user 为 true')
-        
-        if (token && user) {
-          console.log('✅ 8. 条件2: token && user 为 true - 自动登录成功')
-          console.log('🚀 9. 准备跳转到个人信息页面')
-          navigate('/profile', { 
-            replace: true, // 替换当前历史记录，避免回退到注册页
-            state: { from: 'register' }
-          })
-          console.log('🎯 10. navigate 函数已调用 - 应该立即跳转')
-        } else {
-          console.log('⚠️ 8. 条件2: token && user 为 false - 需要手动登录')
-          console.log('🚀 9. 准备跳转到登录页面')
-          navigate('/login', { 
-            state: { 
-              message: '注册成功！请使用您的账号登录',
-              prefillEmail: formData.email // 预填充邮箱
-            }
-          })
-          console.log('🎯 10. navigate 函数已调用 - 跳转到登录页')
-        }
-      } else {
-        console.log('⚠️ 7. 条件1: result && result.token && result.user 为 false')
-        console.log('🚀 8. 准备跳转到登录页面')
-        navigate('/login', { 
-          state: { message: '注册成功！请登录' }
+      // 简化：直接跳转，使用 setTimeout 确保在下一个事件循环中执行
+      console.log('🚀 准备跳转到 /profile')
+      setTimeout(() => {
+        console.log('🎯 执行 navigate 到 /profile')
+        navigate('/profile', { 
+          replace: true,
+          state: { from: 'register' }
         })
-        console.log('🎯 9. navigate 函数已调用 - 跳转到登录页')
-      }
+      }, 100)
+      
     } catch (err) {
       console.error('❌ 注册错误:', err)
-      console.error('❌ 错误详情:', err.message)
-      console.error('❌ 完整错误对象:', err)
-      
-      // 更友好的错误提示
-      const errorMessage = err.message || '注册失败，请重试'
-      setError(errorMessage)
-      
-      // 如果是用户名或邮箱已存在，清空相关字段
-      if (errorMessage.includes('用户') || errorMessage.includes('邮箱')) {
-        setFormData(prev => ({
-          ...prev,
-          username: errorMessage.includes('用户') ? '' : prev.username,
-          email: errorMessage.includes('邮箱') ? '' : prev.email,
-          password: '',
-          confirmPassword: ''
-        }))
-      }
+      setError(err.message || '注册失败，请重试')
     } finally {
-      console.log('🏁 finally 块执行 - 设置 loading 为 false')
       setLoading(false)
     }
   }
 
   // 测试重定向按钮
   const testRedirect = () => {
-    console.log('🧪 测试重定向...')
-    console.log('当前 localStorage:')
-    console.log('  authToken:', localStorage.getItem('authToken'))
-    console.log('  user:', localStorage.getItem('user'))
-    console.log('AuthContext currentUser:', currentUser)
-    
-    console.log('🚀 测试跳转到 /profile')
+    console.log('🧪 测试重定向到 /profile')
     navigate('/profile', { replace: true })
-    console.log('🎯 测试 navigate 函数已调用')
   }
 
   return (
@@ -191,7 +122,7 @@ const Register = () => {
                 onChange={handleChange}
                 required
                 disabled={loading}
-                placeholder="请输入用户名（唯一标识）"
+                placeholder="请输入用户名"
                 minLength="2"
                 maxLength="20"
               />
@@ -248,16 +179,7 @@ const Register = () => {
             >
               {loading ? (
                 <>
-                  <span className="loading-spinner" style={{
-                    display: 'inline-block',
-                    width: '16px',
-                    height: '16px',
-                    border: '2px solid transparent',
-                    borderTop: '2px solid currentColor',
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite',
-                    marginRight: '8px'
-                  }}></span>
+                  <span className="loading-spinner"></span>
                   注册中...
                 </>
               ) : '立即注册'}
@@ -286,8 +208,17 @@ const Register = () => {
         </div>
       </div>
 
-      {/* 添加旋转动画 */}
       <style>{`
+        .loading-spinner {
+          display: inline-block;
+          width: 16px;
+          height: 16px;
+          border: 2px solid transparent;
+          border-top: 2px solid currentColor;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-right: 8px;
+        }
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
