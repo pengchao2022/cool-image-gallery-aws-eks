@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext.jsx'
 import Header from './components/common/Header.jsx'
+import Footer from './components/common/Footer.jsx'  // 导入 Footer 组件
 import Home from './pages/Home.jsx'
 import Browse from './pages/Browse.jsx'
 import Profile from './pages/Profile.jsx'
@@ -32,9 +33,9 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        <div className="App">
+        <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
           <Header />
-          <main>
+          <main style={{ flex: 1 }}>
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/browse" element={<Browse />} />
@@ -59,6 +60,7 @@ function App() {
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>
+          <Footer />  {/* 使用 Footer 组件 */}
         </div>
       </Router>
     </AuthProvider>
