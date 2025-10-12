@@ -34,7 +34,6 @@ const Upload = () => {
         setFormData(prev => ({ ...prev, files: validFiles }))
       }
     }
-    // 清空input值，允许重复选择相同文件
     e.target.value = ''
   }
 
@@ -54,6 +53,13 @@ const Upload = () => {
 
     setUploading(true)
     try {
+      console.log('🚀 开始上传漫画...')
+      console.log('👤 当前用户:', currentUser)
+      
+      // 检查token
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token')
+      console.log('🔑 Token状态:', token ? '存在' : '不存在')
+      
       const submitData = new FormData()
       submitData.append('title', formData.title)
       submitData.append('description', formData.description)
@@ -62,23 +68,48 @@ const Upload = () => {
         submitData.append('images', file)
       })
 
-      const response = await api.post('/comics', submitData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
+      console.log('📤 表单数据:', {
+        title: formData.title,
+        description: formData.description,
+        fileCount: formData.files.length,
+        files: formData.files.map(f => f.name)
       })
 
-      if (response.data.success) {
+      console.log('📤 调用上传API...')
+      
+      // 使用多文件上传方法
+      const response = await api.comics.createMultiple({
+        title: formData.title,
+        description: formData.description
+      }, formData.files)
+
+      console.log('✅ 上传成功:', response)
+      
+      if (response.success) {
         alert('上传成功！')
         setFormData({ title: '', description: '', files: [] })
         navigate('/browse')
       } else {
-        throw new Error(response.data.message || '上传失败')
+        throw new Error(response.message || '上传失败')
       }
 
     } catch (error) {
-      console.error('上传失败:', error)
-      alert(`上传失败: ${error.response?.data?.message || error.message}`)
+      console.error('❌ 上传失败:', error)
+      
+      // 处理特定错误类型
+      let errorMessage = error.message
+      if (error.message.includes('token') || error.message.includes('401') || error.message.includes('Unauthorized')) {
+        errorMessage = '认证失败：Token无效或已过期'
+        alert(`${errorMessage}，请重新登录`)
+        localStorage.removeItem('authToken')
+        localStorage.removeItem('token')
+        navigate('/login')
+        return
+      } else if (error.message.includes('Failed to fetch') || error.message.includes('Network')) {
+        errorMessage = '网络连接失败，请检查后端服务是否正常运行'
+      }
+      
+      alert(`上传失败: ${errorMessage}`)
     } finally {
       setUploading(false)
     }
@@ -202,7 +233,7 @@ const Upload = () => {
             >
               {uploading ? (
                 <>
-                  <i className="fas fa-spinner fa-spin"></i>
+                  <i className="fas fa-spinner fa-spin" style={{ marginRight: '8px' }}></i>
                   上传中...
                 </>
               ) : (
@@ -211,6 +242,22 @@ const Upload = () => {
             </button>
           </div>
         </form>
+
+        {/* 调试信息 */}
+        <div style={{ 
+          marginTop: '30px', 
+          padding: '15px', 
+          background: '#f8f9fa', 
+          borderRadius: '8px',
+          fontSize: '0.8rem',
+          color: '#666'
+        }}>
+          <h4 style={{ marginBottom: '10px' }}>调试信息</h4>
+          <div>用户: {currentUser?.username || '未登录'}</div>
+          <div>用户ID: {currentUser?.id || '未知'}</div>
+          <div>Token: {localStorage.getItem('authToken') ? '存在' : '不存在'}</div>
+          <div>上传状态: {uploading ? '进行中' : '空闲'}</div>
+        </div>
       </div>
     </div>
   )
