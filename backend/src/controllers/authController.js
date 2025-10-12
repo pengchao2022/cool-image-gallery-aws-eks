@@ -9,10 +9,10 @@ export const register = async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
-    // 检查用户是否已存在
+    // 修复：使用正确的 Sequelize 查询语法
     const existingUser = await User.findOne({
       where: {
-        $or: [
+        [sequelize.Op.or]: [
           { email: email },
           { username: username }
         ]
