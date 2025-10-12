@@ -1,4 +1,4 @@
-import api from './api.js'
+import api from './api.jsx'
 
 class AuthService {
   async login(email, password) {
