@@ -4,7 +4,4 @@ metadata:
   name: frontend-config
   namespace: comic-website
 data:
-  REACT_APP_API_URL: "http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com/api"
-  REACT_APP_S3_BASE_URL: "https://comic-website-prod-comic-storage.s3.us-east-1.amazonaws.com"
-  REACT_APP_UPLOAD_MAX_SIZE: "52428800"
-  REACT_APP_VERSION: "1.0.0"
+  VITE_API_URL: "http://backend-service.comic-website.svc.cluster.local:3001/api"
