@@ -20,6 +20,8 @@ const Register = () => {
       ...formData,
       [e.target.name]: e.target.value
     })
+    // 清除错误信息当用户开始输入时
+    if (error) setError('')
   }
 
   const handleSubmit = async (e) => {
@@ -27,17 +29,99 @@ const Register = () => {
     setLoading(true)
     setError('')
 
+    // 增强表单验证
+    if (!formData.username.trim()) {
+      setError('请输入用户名')
+      setLoading(false)
+      return
+    }
+
+    if (!formData.email.trim()) {
+      setError('请输入邮箱地址')
+      setLoading(false)
+      return
+    }
+
+    if (!formData.password) {
+      setError('请输入密码')
+      setLoading(false)
+      return
+    }
+
+    if (formData.password.length < 6) {
+      setError('密码长度至少6位')
+      setLoading(false)
+      return
+    }
+
     if (formData.password !== formData.confirmPassword) {
       setError('两次输入的密码不一致')
       setLoading(false)
       return
     }
 
+    // 邮箱格式验证
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(formData.email)) {
+      setError('请输入有效的邮箱地址')
+      setLoading(false)
+      return
+    }
+
     try {
-      await register(formData.username, formData.email, formData.password)
-      navigate('/profile')
+      console.log('开始注册...', { username: formData.username, email: formData.email })
+      
+      // 调用注册函数
+      const result = await register(formData.username, formData.email, formData.password)
+      console.log('注册返回结果:', result)
+
+      // 注册成功后的处理
+      if (result && result.success) {
+        // 检查是否有token（表示自动登录成功）
+        const token = localStorage.getItem('authToken')
+        const user = localStorage.getItem('user')
+        
+        console.log('注册成功，检查登录状态:', { token, user })
+        
+        if (token && user) {
+          // 自动登录成功，跳转到个人信息页面
+          console.log('自动登录成功，跳转到个人信息页面')
+          navigate('/profile', { 
+            replace: true, // 替换当前历史记录，避免回退到注册页
+            state: { from: 'register' }
+          })
+        } else {
+          // 需要手动登录，跳转到登录页面并显示成功消息
+          console.log('需要手动登录，跳转到登录页面')
+          navigate('/login', { 
+            state: { 
+              message: '注册成功！请使用您的账号登录',
+              prefillEmail: formData.email // 预填充邮箱
+            }
+          })
+        }
+      } else {
+        // 注册返回了成功但数据不完整
+        navigate('/login', { 
+          state: { message: '注册成功！请登录' }
+        })
+      }
     } catch (err) {
-      setError(err.message || '注册失败，请重试')
+      console.error('注册错误:', err)
+      // 更友好的错误提示
+      const errorMessage = err.message || '注册失败，请重试'
+      setError(errorMessage)
+      
+      // 如果是用户名或邮箱已存在，清空相关字段
+      if (errorMessage.includes('用户') || errorMessage.includes('邮箱')) {
+        setFormData(prev => ({
+          ...prev,
+          username: errorMessage.includes('用户') ? '' : prev.username,
+          email: errorMessage.includes('邮箱') ? '' : prev.email,
+          password: '',
+          confirmPassword: ''
+        }))
+      }
     } finally {
       setLoading(false)
     }
@@ -52,6 +136,7 @@ const Register = () => {
           
           {error && (
             <div className="auth-error">
+              <span style={{marginRight: '8px'}}>⚠️</span>
               {error}
             </div>
           )}
@@ -67,7 +152,9 @@ const Register = () => {
                 onChange={handleChange}
                 required
                 disabled={loading}
-                placeholder="请输入用户名"
+                placeholder="请输入用户名（唯一标识）"
+                minLength="2"
+                maxLength="20"
               />
             </div>
 
@@ -81,7 +168,7 @@ const Register = () => {
                 onChange={handleChange}
                 required
                 disabled={loading}
-                placeholder="请输入您的邮箱"
+                placeholder="请输入有效的邮箱地址"
               />
             </div>
 
@@ -96,6 +183,7 @@ const Register = () => {
                 required
                 disabled={loading}
                 placeholder="请输入密码（至少6位）"
+                minLength="6"
               />
             </div>
 
@@ -110,6 +198,7 @@ const Register = () => {
                 required
                 disabled={loading}
                 placeholder="请再次输入密码"
+                minLength="6"
               />
             </div>
 
@@ -118,7 +207,21 @@ const Register = () => {
               className="btn btn-primary auth-submit"
               disabled={loading}
             >
-              {loading ? '注册中...' : '注册'}
+              {loading ? (
+                <>
+                  <span className="loading-spinner" style={{
+                    display: 'inline-block',
+                    width: '16px',
+                    height: '16px',
+                    border: '2px solid transparent',
+                    borderTop: '2px solid currentColor',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                    marginRight: '8px'
+                  }}></span>
+                  注册中...
+                </>
+              ) : '立即注册'}
             </button>
           </form>
 
@@ -127,6 +230,14 @@ const Register = () => {
           </p>
         </div>
       </div>
+
+      {/* 添加旋转动画 */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   )
 }

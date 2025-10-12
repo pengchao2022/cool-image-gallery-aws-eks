@@ -6,8 +6,8 @@ class AuthService {
       const response = await api.auth.login(email, password)
       
       if (response.token) {
-        localStorage.setItem('token', response.token)
-        localStorage.setItem('currentUser', JSON.stringify(response.user))
+        localStorage.setItem('authToken', response.token)  // 改为 authToken
+        localStorage.setItem('user', JSON.stringify(response.user))  // 改为 user
       }
       
       return response
@@ -22,8 +22,8 @@ class AuthService {
       const response = await api.auth.register(username, email, password)
       
       if (response.token) {
-        localStorage.setItem('token', response.token)
-        localStorage.setItem('currentUser', JSON.stringify(response.user))
+        localStorage.setItem('authToken', response.token)  // 改为 authToken
+        localStorage.setItem('user', JSON.stringify(response.user))  // 改为 user
       }
       
       return response
@@ -33,13 +33,13 @@ class AuthService {
   }
 
   logout() {
-    localStorage.removeItem('token')
-    localStorage.removeItem('currentUser')
+    localStorage.removeItem('authToken')  // 改为 authToken
+    localStorage.removeItem('user')       // 改为 user
   }
 
   getCurrentUser() {
     try {
-      const userStr = localStorage.getItem('currentUser')
+      const userStr = localStorage.getItem('user')  // 改为 user
       return userStr ? JSON.parse(userStr) : null
     } catch (error) {
       console.error('解析用户数据失败:', error)
@@ -48,7 +48,7 @@ class AuthService {
   }
 
   getToken() {
-    return localStorage.getItem('token')
+    return localStorage.getItem('authToken')  // 改为 authToken
   }
 
   isAuthenticated() {
