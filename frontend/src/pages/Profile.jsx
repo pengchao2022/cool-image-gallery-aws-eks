@@ -6,11 +6,12 @@ import '../App.css'
 import './Profile.css'  
 
 const Profile = () => {
-  const { currentUser, logout } = useContext(AuthContext)
+  const { currentUser, logout, token } = useContext(AuthContext)
   const [activeTab, setActiveTab] = useState('info')
   const [userComics, setUserComics] = useState([])
   const [loading, setLoading] = useState(false)
   const [registrationDate, setRegistrationDate] = useState('加载中...')
+  const [apiError, setApiError] = useState('')
   const navigate = useNavigate()
 
   // 获取用户注册时间
@@ -23,51 +24,73 @@ const Profile = () => {
   const fetchRegistrationDate = async () => {
     try {
       console.log('🔄 获取用户注册时间...用户ID:', currentUser.id)
+      console.log('🔑 当前用户:', currentUser)
+      setApiError('')
       
-      // 直接调用后端API获取注册时间
-      const response = await fetch(`/api/user/registration-date/${currentUser.id}`)
-      
-      if (response.ok) {
-        const data = await response.json()
-        console.log('✅ 注册时间响应:', data)
+      // 方法1: 使用你现有的 api 服务（推荐）
+      try {
+        console.log('🔄 尝试使用 api 服务...')
+        const response = await api.get(`/users/registration-date/${currentUser.id}`)
+        console.log('✅ api 服务响应:', response.data)
         
-        if (data.created_at) {
-          const beijingTime = formatToBeijingTime(data.created_at)
+        if (response.data.success && response.data.created_at) {
+          const beijingTime = formatToBeijingTime(response.data.created_at)
           setRegistrationDate(beijingTime)
           return
         }
+      } catch (apiError) {
+        console.log('❌ api 服务失败:', apiError)
+        // 继续尝试其他方法
       }
-      
-      // 如果专用API不存在，尝试通用用户信息API
-      await tryAlternativeAPI()
+
+      // 方法2: 尝试用户详情 API
+      try {
+        console.log('🔄 尝试用户详情API...')
+        const response = await api.get(`/users/${currentUser.id}`)
+        console.log('✅ 用户详情API响应:', response.data)
+        
+        if (response.data.success && response.data.user && response.data.user.created_at) {
+          const beijingTime = formatToBeijingTime(response.data.user.created_at)
+          setRegistrationDate(beijingTime)
+          return
+        }
+      } catch (userApiError) {
+        console.log('❌ 用户详情API失败:', userApiError)
+      }
+
+      // 方法3: 直接查询数据库（通过现有API）
+      await tryDatabaseQuery()
       
     } catch (error) {
-      console.error('❌ 获取注册时间失败:', error)
+      console.error('❌ 所有方法都失败:', error)
+      setApiError(`获取失败: ${error.message}`)
       setRegistrationDate('获取失败')
     }
   }
 
-  const tryAlternativeAPI = async () => {
+  const tryDatabaseQuery = async () => {
     try {
-      const response = await fetch(`/api/users/${currentUser.id}`)
+      console.log('🔄 尝试直接数据库查询...')
       
-      if (response.ok) {
-        const userData = await response.json()
-        console.log('✅ 用户完整数据:', userData)
-        
-        // 查找注册时间字段
-        if (userData.created_at) {
-          const beijingTime = formatToBeijingTime(userData.created_at)
-          setRegistrationDate(beijingTime)
-        } else {
-          setRegistrationDate('时间字段不存在')
-        }
-      } else {
-        setRegistrationDate('API不可用')
+      // 使用你现有的认证API来获取用户信息
+      const response = await api.get('/users/profile')
+      console.log('✅ 用户profile响应:', response.data)
+      
+      // 检查返回的用户数据是否包含时间信息
+      if (response.data.created_at) {
+        const beijingTime = formatToBeijingTime(response.data.created_at)
+        setRegistrationDate(beijingTime)
+        return
       }
+      
+      // 如果还是没有时间信息，显示基于用户ID的估算
+      setRegistrationDate(estimateRegistrationDate(currentUser.id))
+      setApiError('使用估算时间（API未返回注册时间）')
+      
     } catch (error) {
-      console.error('❌ 备选API也失败:', error)
-      setRegistrationDate('网络错误')
+      console.error('❌ 数据库查询失败:', error)
+      setRegistrationDate(estimateRegistrationDate(currentUser.id))
+      setApiError('使用估算时间（API调用失败）')
     }
   }
 
@@ -91,7 +114,21 @@ const Profile = () => {
     }
   }
 
-  // 其他代码保持不变...
+  // 基于用户ID估算注册时间（临时方案）
+  const estimateRegistrationDate = (userId) => {
+    // 根据你之前查询的数据，用户ID 83 的注册时间是 2025-10-12
+    // 我们基于这个来估算
+    const baseDate = new Date('2025-10-12') // 用户83的注册时间
+    const baseUserId = 83
+    
+    // 计算时间差（假设用户注册时间大致按ID顺序）
+    const daysDiff = (userId - baseUserId) * 1 // 每天注册几个用户
+    
+    const estimatedDate = new Date(baseDate.getTime() + daysDiff * 24 * 60 * 60 * 1000)
+    const beijingTime = new Date(estimatedDate.getTime() + 8 * 60 * 60 * 1000)
+    return beijingTime.toISOString().split('T')[0] + ' (估算)'
+  }
+
   useEffect(() => {
     if (currentUser && activeTab === 'comics') {
       fetchUserComics()
@@ -101,6 +138,7 @@ const Profile = () => {
   const fetchUserComics = async () => {
     try {
       setLoading(true)
+      // 模拟获取用户漫画数据
       setTimeout(() => {
         setUserComics([
           { id: 1, title: "我的第一部漫画", image_url: "https://picsum.photos/300/200?random=10", created_at: new Date().toISOString() },
@@ -164,10 +202,14 @@ const Profile = () => {
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
           <p style={{ color: '#666', marginBottom: '5px' }}>邮箱: {currentUser.email}</p>
           <p style={{ color: '#666' }}>注册时间: {registrationDate}</p>
+          {apiError && (
+            <p style={{ color: 'orange', fontSize: '0.8rem', marginTop: '5px' }}>
+              提示: {apiError}
+            </p>
+          )}
         </div>
       </div>
 
-      {/* 其余代码保持不变 */}
       <div className="profile-content" style={{
         display: 'grid',
         gridTemplateColumns: '250px 1fr',
@@ -273,6 +315,11 @@ const Profile = () => {
                 <div className="info-item">
                   <label style={{ fontWeight: 'bold', color: '#666', display: 'block', marginBottom: '5px' }}>注册时间</label>
                   <p style={{ fontSize: '1.1rem' }}>{registrationDate}</p>
+                  {apiError && (
+                    <p style={{ color: 'orange', fontSize: '0.8rem', marginTop: '5px' }}>
+                      提示: {apiError}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
