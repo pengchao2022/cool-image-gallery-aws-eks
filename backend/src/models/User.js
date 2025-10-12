@@ -29,6 +29,14 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: false
   },
+  // 添加虚拟字段用于接收原始密码
+  password: {
+    type: DataTypes.VIRTUAL,
+    allowNull: false,
+    validate: {
+      len: [6, 100]
+    }
+  },
   role: {
     type: DataTypes.STRING,
     defaultValue: 'user'
@@ -37,18 +45,19 @@ const User = sequelize.define('User', {
   tableName: 'users',
   timestamps: true,
   createdAt: 'created_at',
-  updatedAt: 'updated_at',
-  hooks: {
-    beforeCreate: async (user) => {
-      if (user.password) {
-        user.password_hash = await bcrypt.hash(user.password, 10);
-      }
-    },
-    beforeUpdate: async (user) => {
-      if (user.changed('password')) {
-        user.password_hash = await bcrypt.hash(user.password, 10);
-      }
-    }
+  updatedAt: 'updated_at'
+});
+
+// 使用实例方法处理密码加密
+User.beforeCreate(async (user) => {
+  if (user.password) {
+    user.password_hash = await bcrypt.hash(user.password, 10);
+  }
+});
+
+User.beforeUpdate(async (user) => {
+  if (user.changed('password')) {
+    user.password_hash = await bcrypt.hash(user.password, 10);
   }
 });
 
@@ -60,6 +69,7 @@ User.prototype.validatePassword = async function(password) {
 User.prototype.toJSON = function() {
   const values = { ...this.get() };
   delete values.password_hash;
+  delete values.password; // 也删除虚拟字段
   return values;
 };
 
