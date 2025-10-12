@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
-import { sequelize } from '../config/database.js'; // 添加这行导入
+import { sequelize } from '../config/database.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -74,4 +74,108 @@ export const register = async (req, res) => {
 
     res.status(500).json({ error: 'Registration failed: ' + error.message });
   }
+};
+
+// 添加缺失的 login 函数
+export const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // 从数据库查找用户
+    const [users] = await sequelize.query(
+      'SELECT * FROM users WHERE email = :email',
+      {
+        replacements: { email },
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+    
+    const user = users[0];
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // 验证密码
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // 生成 JWT token
+    const token = jwt.sign(
+      { 
+        userId: user.id, 
+        email: user.email, 
+        role: user.role || 'user'
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role || 'user'
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+};
+
+// 添加缺失的 getProfile 函数
+export const getProfile = async (req, res) => {
+  try {
+    const [users] = await sequelize.query(
+      'SELECT id, username, email, role, created_at FROM users WHERE id = :userId',
+      {
+        replacements: { userId: req.user.userId },
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+    
+    const user = users[0];
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ user });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    res.status(500).json({ error: 'Failed to get profile' });
+  }
+};
+
+// 添加缺失的 verifyToken 中间件
+export const verifyToken = (req, res, next) => {
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Invalid token.' });
+  }
+};
+
+// 添加缺失的 requireAdmin 中间件
+export const requireAdmin = (req, res, next) => {
+  if (req.user && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required.' });
+  }
+  next();
 };
