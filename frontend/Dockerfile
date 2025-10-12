@@ -1,32 +1,32 @@
-# ===== Build Stage =====
-FROM node:18-alpine AS build
+# 使用 Node.js 官方镜像
+FROM node:18-alpine as build
+
+# 设置工作目录
 WORKDIR /app
 
-# 复制依赖文件
+# 复制 package.json 和 package-lock.json
 COPY package*.json ./
-RUN npm ci
 
-# 复制源码（包括 public）
+# 安装依赖
+RUN npm install
+
+# 复制源代码
 COPY . .
 
-# 把 public/index.html 移动到根目录（Vite 默认入口）
-RUN cp public/index.html ./index.html
-
-# 构建前端
+# 构建前端（Vite 使用 npm run build）
 RUN npm run build
 
-# ===== Production Stage =====
+# 生产环境使用 nginx
 FROM nginx:alpine
-WORKDIR /usr/share/nginx/html
 
-# 清理默认文件
-RUN rm -rf ./*
+# 复制构建好的文件到 nginx 服务目录
+COPY --from=build /app/dist /usr/share/nginx/html
 
-# 拷贝构建结果
-COPY --from=build /app/dist .
+# 复制 nginx 配置
+COPY nginx.conf /etc/nginx/nginx.conf
 
-# 拷贝 nginx 配置
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
+# 暴露端口
 EXPOSE 80
+
+# 启动 nginx
 CMD ["nginx", "-g", "daemon off;"]
