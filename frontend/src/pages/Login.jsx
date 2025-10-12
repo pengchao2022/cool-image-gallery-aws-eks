@@ -26,33 +26,10 @@ const Login = () => {
     setError('')
 
     try {
-      console.log('🔄 开始登录流程...')
-      console.log('📧 邮箱:', formData.email)
-      
-      // 调用登录函数
-      const result = await login(formData.email, formData.password)
-      console.log('✅ 登录API调用成功，返回结果:', result)
-      
-      // 检查 localStorage 中的认证状态
-      const token = localStorage.getItem('authToken')
-      const user = localStorage.getItem('user')
-      console.log('🔐 认证状态检查:')
-      console.log('   Token:', token ? '存在' : '不存在')
-      console.log('   User:', user)
-      
-      // 登录成功，跳转到 profile
-      console.log('🚀 准备跳转到 /profile')
-      navigate('/profile', { replace: true })
-      console.log('🎯 navigate 函数已调用')
-      
+      await login(formData.email, formData.password)
+      navigate('/profile')
     } catch (err) {
-      console.error('❌ 登录错误:', err)
-      console.error('❌ 错误详情:', err.message)
       setError(err.message || '登录失败，请重试')
-      
-      // 检查是否因为网络错误导致
-      const token = localStorage.getItem('authToken')
-      console.log('❌ 错误时 token 状态:', token)
     } finally {
       setLoading(false)
     }
