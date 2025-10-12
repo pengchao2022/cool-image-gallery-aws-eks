@@ -32,13 +32,16 @@ app.use(compression());
 // Logging
 app.use(morgan('combined'));
 
-// CORS - 修改这部分
+// CORS - 极简智能配置（推荐使用这个）
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:3000',
-    'http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com',
-    'https://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com'
-  ],
+  origin: function (origin, callback) {
+    // 记录请求来源（可选）
+    if (origin) {
+      console.log('🌐 请求来源:', origin);
+    }
+    // 允许所有来源，依赖其他安全措施
+    callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
