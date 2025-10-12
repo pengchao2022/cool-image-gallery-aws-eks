@@ -91,15 +91,15 @@ const Register = () => {
       // 检查 currentUser 状态
       console.log('👤 5. AuthContext currentUser:', currentUser)
 
-      // 注册成功后的处理
+      // 注册成功后的处理 - 修复条件判断
       console.log('🔍 6. 检查注册结果条件:')
-      console.log('   result:', result)
-      console.log('   result.success:', result?.success)
+      console.log('   result.token:', result?.token)
+      console.log('   result.user:', result?.user)
       console.log('   token && user:', token && user)
 
-      if (result && result.success) {
-        console.log('✅ 7. 条件1: result && result.success 为 true')
-        // 检查是否有token（表示自动登录成功）
+      // 修复：使用 token 和 user 存在作为成功条件，而不是 result.success
+      if (result && result.token && result.user) {
+        console.log('✅ 7. 条件1: result && result.token && result.user 为 true')
         
         if (token && user) {
           console.log('✅ 8. 条件2: token && user 为 true - 自动登录成功')
@@ -121,7 +121,7 @@ const Register = () => {
           console.log('🎯 10. navigate 函数已调用 - 跳转到登录页')
         }
       } else {
-        console.log('⚠️ 7. 条件1: result && result.success 为 false')
+        console.log('⚠️ 7. 条件1: result && result.token && result.user 为 false')
         console.log('🚀 8. 准备跳转到登录页面')
         navigate('/login', { 
           state: { message: '注册成功！请登录' }
