@@ -65,7 +65,8 @@ export const register = async (req, res) => {
         id: user.id,
         username: user.username,
         email: user.email,
-        role: user.role || 'user'
+        role: user.role || 'user',
+        created_at: user.created_at  // 新增这一行
       }
     });
 
@@ -126,7 +127,8 @@ export const login = async (req, res) => {
         id: user.id,
         username: user.username,
         email: user.email,
-        role: user.role || 'user'
+        role: user.role || 'user',
+        created_at: user.created_at  // 新增这一行
       }
     });
 
@@ -157,7 +159,14 @@ export const getProfile = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    res.json({ user });
+    // 修改这里：直接返回用户对象，而不是 { user: user }
+    res.json({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      created_at: user.created_at  // 确保包含这个字段
+    });
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Failed to get profile: ' + error.message });

@@ -1,21 +1,16 @@
 import express from 'express';
 import { query } from '../config/database.js';
-import { verifyToken } from '../controllers/authController.js';
+import { verifyToken, getProfile } from '../controllers/authController.js';
 
 const router = express.Router();
 
-// Get user profile
+// Get user profile - 修改这里：直接调用 getProfile 控制器
 router.get('/profile', verifyToken, async (req, res) => {
     try {
-        // 模拟用户数据
-        const user = {
-            id: req.user.userId,
-            username: 'testuser',
-            email: req.user.email,
-            role: req.user.role
-        };
-        res.json(user);
+        // 直接调用 getProfile 控制器，它会从数据库查询真实数据
+        await getProfile(req, res);
     } catch (error) {
+        console.error('Profile route error:', error);
         res.status(500).json({ error: 'Failed to fetch user profile' });
     }
 });
