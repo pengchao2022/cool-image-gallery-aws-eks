@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AuthContext } from '../../context/AuthContext.jsx'
 
 const Header = () => {
-  const { currentUser, logout } = useContext(AuthContext)
+  const { currentUser } = useContext(AuthContext)
   const navigate = useNavigate()
 
   console.log('🔍 Header当前用户:', currentUser)
@@ -11,12 +11,6 @@ const Header = () => {
   const handleAvatarClick = () => {
     console.log('👤 头像被点击了，跳转到个人资料')
     navigate('/profile')
-  }
-
-  const handleLogout = () => {
-    console.log('🚪 执行退出登录')
-    logout()
-    navigate('/')
   }
 
   return (
@@ -57,7 +51,7 @@ const Header = () => {
                   上传漫画
                 </Link>
                 
-                {/* 头像 - 确保可点击 */}
+                {/* 头像 - 点击可进入个人资料 */}
                 <div 
                   className="user-avatar"
                   onClick={handleAvatarClick}
@@ -65,13 +59,6 @@ const Header = () => {
                 >
                   {currentUser.username?.[0]?.toUpperCase() || 'U'}
                 </div>
-                
-                <button 
-                  className="btn btn-outline" 
-                  onClick={handleLogout}
-                >
-                  退出
-                </button>
               </div>
             ) : (
               <>
