@@ -20,8 +20,8 @@ async function request(endpoint, options = {}) {
     config.body = JSON.stringify(config.body)
   }
 
-  // 添加认证token
-  const token = localStorage.getItem('token')
+  // 添加认证token - 注意：你的应用使用 authToken
+  const token = localStorage.getItem('authToken')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -65,13 +65,15 @@ async function request(endpoint, options = {}) {
 // 上传文件请求
 async function uploadRequest(endpoint, formData) {
   const url = `${API_BASE_URL}${endpoint}`
-  const token = localStorage.getItem('token')
+  // 注意：你的应用使用 authToken
+  const token = localStorage.getItem('authToken')
 
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: token ? `Bearer ${token}` : undefined,
+        // 不要设置 Content-Type，让浏览器自动设置 multipart/form-data
       },
       body: formData,
     })
@@ -132,7 +134,7 @@ export const api = {
     // 获取单个漫画
     getById: (id) => request(`/comics/${id}`),
     
-    // 创建漫画（上传）
+    // 创建漫画（上传）- 单文件版本
     create: (comicData, imageFile) => {
       const formData = new FormData()
       formData.append('title', comicData.title)
@@ -140,6 +142,17 @@ export const api = {
       if (imageFile) {
         formData.append('image', imageFile)
       }
+      return uploadRequest('/comics', formData)
+    },
+    
+    // 创建漫画（多文件版本）- 与后端路由匹配
+    createMultiple: (comicData, files) => {
+      const formData = new FormData()
+      formData.append('title', comicData.title)
+      formData.append('description', comicData.description || '')
+      files.forEach((file) => {
+        formData.append('images', file) // 字段名必须是 images
+      })
       return uploadRequest('/comics', formData)
     },
     
@@ -157,10 +170,10 @@ export const api = {
       }),
     
     // 获取用户自己的漫画
-    getMyComics: () => request('/comics/my'),
+    getMyComics: () => request('/comics/my-comics'),
     
-    // 获取特定用户的漫画
-    getUserComics: (userId) => request(`/comics/user/${userId}`),
+    // 搜索漫画
+    search: (query) => request(`/comics/search?q=${encodeURIComponent(query)}`),
   },
 
   // 用户相关
@@ -176,13 +189,54 @@ export const api = {
       }),
     
     // 获取当前登录用户信息
-    getCurrentUser: () => request('/users/me'),
+    getCurrentUser: () => request('/users/profile'),
+    
+    // 获取用户注册时间
+    getRegistrationDate: (userId) => request(`/users/registration-date/${userId}`),
   },
 
   // 健康检查
   health: {
     check: () => request('/health'),
   },
+
+  // 直接请求方法
+  post: (endpoint, data, options = {}) => {
+    if (data instanceof FormData) {
+      return uploadRequest(endpoint, data)
+    } else {
+      return request(endpoint, {
+        method: 'POST',
+        body: data,
+        ...options
+      })
+    }
+  },
+
+  get: (endpoint, options = {}) => {
+    return request(endpoint, {
+      method: 'GET',
+      ...options
+    })
+  },
+
+  put: (endpoint, data, options = {}) => {
+    return request(endpoint, {
+      method: 'PUT',
+      body: data,
+      ...options
+    })
+  },
+
+  delete: (endpoint, options = {}) => {
+    return request(endpoint, {
+      method: 'DELETE',
+      ...options
+    })
+  },
+
+  // 导出上传请求函数供直接使用
+  uploadRequest: uploadRequest
 }
 
 // 添加调试信息
