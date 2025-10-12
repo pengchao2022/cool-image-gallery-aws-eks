@@ -11,7 +11,7 @@ const Footer = () => {
         <div className="footer-content">
           <div className="footer-section">
             <h4>漫画世界</h4>
-            <p>&copy; {currentYear} 漫画网站. Designed by Pengchao Ma @2025 保留所有权利.</p>
+            <p>&copy; {currentYear} 漫画网站. Designed by Pengchao Ma 保留所有权利.</p>
           </div>
           <div className="footer-section">
             <p><strong>开发团队</strong></p>
