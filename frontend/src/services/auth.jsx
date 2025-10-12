@@ -1,56 +1,59 @@
-import React from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider } from './context/AuthContext.jsx'
-import Header from './components/common/Header.jsx'
-import Home from './pages/Home.jsx'
-import Browse from './pages/Browse.jsx'
-import Profile from './pages/Profile.jsx'
-import Upload from './pages/Upload.jsx'
-import Login from './pages/Login.jsx'
-import Register from './pages/Register.jsx'
-import './App.css'
+import api from './api.jsx'
 
-// 保护路由组件 - 修复版本
-const ProtectedRoute = ({ children }) => {
-  const token = localStorage.getItem('authToken')  // 改为 authToken 以匹配 AuthService
-  return token ? children : <Navigate to="/login" />
+class AuthService {
+  async login(email, password) {
+    try {
+      const response = await api.auth.login(email, password)
+      
+      if (response.token) {
+        localStorage.setItem('authToken', response.token)
+        localStorage.setItem('user', JSON.stringify(response.user))
+      }
+      
+      return response
+    } catch (error) {
+      this.logout()
+      throw error
+    }
+  }
+
+  async register(username, email, password) {
+    try {
+      const response = await api.auth.register(username, email, password)
+      
+      if (response.token) {
+        localStorage.setItem('authToken', response.token)
+        localStorage.setItem('user', JSON.stringify(response.user))
+      }
+      
+      return response
+    } catch (error) {
+      throw error
+    }
+  }
+
+  logout() {
+    localStorage.removeItem('authToken')
+    localStorage.removeItem('user')
+  }
+
+  getCurrentUser() {
+    try {
+      const userStr = localStorage.getItem('user')
+      return userStr ? JSON.parse(userStr) : null
+    } catch (error) {
+      console.error('解析用户数据失败:', error)
+      return null
+    }
+  }
+
+  getToken() {
+    return localStorage.getItem('authToken')
+  }
+
+  isAuthenticated() {
+    return !!this.getToken()
+  }
 }
 
-function App() {
-  return (
-    <AuthProvider>
-      <Router>
-        <div className="App">
-          <Header />
-          <main>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/browse" element={<Browse />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route 
-                path="/profile" 
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                } 
-              />
-              <Route 
-                path="/upload" 
-                element={
-                  <ProtectedRoute>
-                    <Upload />
-                  </ProtectedRoute>
-                } 
-              />
-              <Route path="*" element={<Navigate to="/" />} />
-            </Routes>
-          </main>
-        </div>
-      </Router>
-    </AuthProvider>
-  )
-}
-
-export default App
+export default new AuthService()
