@@ -1,25 +1,66 @@
-// User model for PostgreSQL
-// This is a placeholder - in a real app, you'd use an ORM like Sequelize or direct SQL
+// src/models/User.js
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../config/database.js';
+import bcrypt from 'bcryptjs';
 
-export class User {
-    constructor(id, username, email, password, role = 'user') {
-        this.id = id;
-        this.username = username;
-        this.email = email;
-        this.password = password;
-        this.role = role;
-        this.createdAt = new Date();
-        this.updatedAt = new Date();
+const User = sequelize.define('User', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  username: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+    validate: {
+      len: [3, 30]
     }
-
-    toJSON() {
-        const { password, ...userWithoutPassword } = this;
-        return userWithoutPassword;
+  },
+  email: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+    validate: {
+      isEmail: true
     }
-}
+  },
+  password_hash: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  role: {
+    type: DataTypes.STRING,
+    defaultValue: 'user'
+  }
+}, {
+  tableName: 'users',
+  timestamps: true,
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+  hooks: {
+    beforeCreate: async (user) => {
+      if (user.password) {
+        user.password_hash = await bcrypt.hash(user.password, 10);
+      }
+    },
+    beforeUpdate: async (user) => {
+      if (user.changed('password')) {
+        user.password_hash = await bcrypt.hash(user.password, 10);
+      }
+    }
+  }
+});
 
-// Mock user data for development
-export const mockUsers = [
-    new User(1, 'admin', 'admin@example.com', 'hashed_password', 'admin'),
-    new User(2, 'user1', 'user1@example.com', 'hashed_password', 'user')
-];
+// 实例方法
+User.prototype.validatePassword = async function(password) {
+  return await bcrypt.compare(password, this.password_hash);
+};
+
+User.prototype.toJSON = function() {
+  const values = { ...this.get() };
+  delete values.password_hash;
+  return values;
+};
+
+export { User };
