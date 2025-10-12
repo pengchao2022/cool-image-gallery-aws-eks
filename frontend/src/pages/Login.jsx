@@ -1,6 +1,6 @@
 import React, { useState, useContext } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AuthContext } from '../frontend/src/context/AuthContext.jsx'
+import { AuthContext } from '../context/AuthContext.jsx'
 import './Auth.css'
 
 const Login = () => {
@@ -27,7 +27,10 @@ const Login = () => {
 
     try {
       await login(formData.email, formData.password)
-      navigate('/profile')
+      navigate('/profile', { 
+        replace: true,
+        state: { from: 'login' }
+      })
     } catch (err) {
       setError(err.message || '登录失败，请重试')
     } finally {
@@ -82,7 +85,21 @@ const Login = () => {
               className="btn btn-primary auth-submit"
               disabled={loading}
             >
-              {loading ? '登录中...' : '登录'}
+              {loading ? (
+                <>
+                  <span className="loading-spinner" style={{
+                    display: 'inline-block',
+                    width: '16px',
+                    height: '16px',
+                    border: '2px solid transparent',
+                    borderTop: '2px solid currentColor',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                    marginRight: '8px'
+                  }}></span>
+                  登录中...
+                </>
+              ) : '登录'}
             </button>
           </form>
 
@@ -91,6 +108,13 @@ const Login = () => {
           </p>
         </div>
       </div>
+
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   )
 }
