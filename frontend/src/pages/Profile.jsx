@@ -3,6 +3,7 @@ import { AuthContext } from '../context/AuthContext.jsx'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api.jsx'
 import '../App.css'
+import './Profile.css'  
 
 const Profile = () => {
   const { currentUser, logout } = useContext(AuthContext)
@@ -32,6 +33,11 @@ const Profile = () => {
       console.error('获取用户漫画失败:', error)
       setLoading(false)
     }
+  }
+
+  const handleLogout = () => {
+    logout()
+    navigate('/', { replace: true }) // 退出后重定向到首页
   }
 
   if (!currentUser) {
@@ -137,7 +143,7 @@ const Profile = () => {
               </li>
               <li>
                 <button
-                  onClick={logout}
+                  onClick={handleLogout} // 使用新的退出处理函数
                   style={{
                     width: '100%',
                     padding: '12px 15px',

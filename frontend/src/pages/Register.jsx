@@ -67,16 +67,11 @@ const Register = () => {
     }
 
     try {
-      console.log('🔄 开始注册...')
-      
       // 调用注册函数
       const result = await register(formData.username, formData.email, formData.password)
-      console.log('✅ 注册成功:', result)
 
-      // 简化：直接跳转，使用 setTimeout 确保在下一个事件循环中执行
-      console.log('🚀 准备跳转到 /profile')
+      // 注册成功后直接跳转到个人资料页面
       setTimeout(() => {
-        console.log('🎯 执行 navigate 到 /profile')
         navigate('/profile', { 
           replace: true,
           state: { from: 'register' }
@@ -84,17 +79,10 @@ const Register = () => {
       }, 100)
       
     } catch (err) {
-      console.error('❌ 注册错误:', err)
       setError(err.message || '注册失败，请重试')
     } finally {
       setLoading(false)
     }
-  }
-
-  // 测试重定向按钮
-  const testRedirect = () => {
-    console.log('🧪 测试重定向到 /profile')
-    navigate('/profile', { replace: true })
   }
 
   return (
@@ -185,22 +173,6 @@ const Register = () => {
               ) : '立即注册'}
             </button>
           </form>
-
-          {/* 测试重定向按钮 */}
-          <button 
-            type="button" 
-            onClick={testRedirect}
-            className="btn btn-secondary"
-            style={{
-              marginTop: '15px',
-              background: '#666',
-              width: '100%',
-              padding: '12px',
-              fontSize: '14px'
-            }}
-          >
-            🧪 测试重定向到 Profile
-          </button>
 
           <p className="auth-switch">
             已有账号？ <Link to="/login">立即登录</Link>
