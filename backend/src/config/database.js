@@ -20,13 +20,27 @@ const sequelize = new Sequelize(
   }
 );
 
-// 测试连接
-sequelize.authenticate()
-  .then(() => {
+// connectDB 函数
+export const connectDB = async () => {
+  try {
+    await sequelize.authenticate();
     console.log('✅ PostgreSQL 连接成功');
-  })
-  .catch(err => {
-    console.error('❌ PostgreSQL 连接失败:', err);
-  });
+    return sequelize;
+  } catch (error) {
+    console.error('❌ PostgreSQL 连接失败:', error);
+    throw error;
+  }
+};
 
+// query 函数
+export const query = (sql, params) => {
+  return sequelize.query(sql, {
+    replacements: params,
+    type: sequelize.QueryTypes.SELECT
+  });
+};
+
+// 导出 sequelize 实例
 export { sequelize };
+
+// 原有的测试连接代码可以移除，因为现在有 connectDB 函数了
