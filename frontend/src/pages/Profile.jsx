@@ -6,95 +6,13 @@ import '../App.css'
 import './Profile.css'  
 
 const Profile = () => {
-  const { currentUser, logout, token } = useContext(AuthContext)
+  const { currentUser, logout } = useContext(AuthContext)
   const [activeTab, setActiveTab] = useState('info')
   const [userComics, setUserComics] = useState([])
   const [loading, setLoading] = useState(false)
-  const [registrationDate, setRegistrationDate] = useState('加载中...')
-  const [apiError, setApiError] = useState('')
   const navigate = useNavigate()
 
-  // 获取用户注册时间
-  useEffect(() => {
-    if (currentUser) {
-      fetchRegistrationDate()
-    }
-  }, [currentUser])
-
-  const fetchRegistrationDate = async () => {
-    try {
-      console.log('🔄 获取用户注册时间...用户ID:', currentUser.id)
-      console.log('🔑 当前用户:', currentUser)
-      setApiError('')
-      
-      // 方法1: 使用你现有的 api 服务（推荐）
-      try {
-        console.log('🔄 尝试使用 api 服务...')
-        const response = await api.get(`/users/registration-date/${currentUser.id}`)
-        console.log('✅ api 服务响应:', response.data)
-        
-        if (response.data.success && response.data.created_at) {
-          const beijingTime = formatToBeijingTime(response.data.created_at)
-          setRegistrationDate(beijingTime)
-          return
-        }
-      } catch (apiError) {
-        console.log('❌ api 服务失败:', apiError)
-        // 继续尝试其他方法
-      }
-
-      // 方法2: 尝试用户详情 API
-      try {
-        console.log('🔄 尝试用户详情API...')
-        const response = await api.get(`/users/${currentUser.id}`)
-        console.log('✅ 用户详情API响应:', response.data)
-        
-        if (response.data.success && response.data.user && response.data.user.created_at) {
-          const beijingTime = formatToBeijingTime(response.data.user.created_at)
-          setRegistrationDate(beijingTime)
-          return
-        }
-      } catch (userApiError) {
-        console.log('❌ 用户详情API失败:', userApiError)
-      }
-
-      // 方法3: 直接查询数据库（通过现有API）
-      await tryDatabaseQuery()
-      
-    } catch (error) {
-      console.error('❌ 所有方法都失败:', error)
-      setApiError(`获取失败: ${error.message}`)
-      setRegistrationDate('获取失败')
-    }
-  }
-
-  const tryDatabaseQuery = async () => {
-    try {
-      console.log('🔄 尝试直接数据库查询...')
-      
-      // 使用你现有的认证API来获取用户信息
-      const response = await api.get('/users/profile')
-      console.log('✅ 用户profile响应:', response.data)
-      
-      // 检查返回的用户数据是否包含时间信息
-      if (response.data.created_at) {
-        const beijingTime = formatToBeijingTime(response.data.created_at)
-        setRegistrationDate(beijingTime)
-        return
-      }
-      
-      // 如果还是没有时间信息，显示基于用户ID的估算
-      setRegistrationDate(estimateRegistrationDate(currentUser.id))
-      setApiError('使用估算时间（API未返回注册时间）')
-      
-    } catch (error) {
-      console.error('❌ 数据库查询失败:', error)
-      setRegistrationDate(estimateRegistrationDate(currentUser.id))
-      setApiError('使用估算时间（API调用失败）')
-    }
-  }
-
-  // 时间转换函数
+  // 时间转换函数 - UTC 转北京时间
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
     
@@ -114,19 +32,15 @@ const Profile = () => {
     }
   }
 
-  // 基于用户ID估算注册时间（临时方案）
-  const estimateRegistrationDate = (userId) => {
-    // 根据你之前查询的数据，用户ID 83 的注册时间是 2025-10-12
-    // 我们基于这个来估算
-    const baseDate = new Date('2025-10-12') // 用户83的注册时间
-    const baseUserId = 83
+  // 获取注册时间 - 从 currentUser 中获取
+  const getRegistrationDate = () => {
+    // 如果 currentUser 中有 created_at，直接使用
+    if (currentUser?.created_at) {
+      return formatToBeijingTime(currentUser.created_at)
+    }
     
-    // 计算时间差（假设用户注册时间大致按ID顺序）
-    const daysDiff = (userId - baseUserId) * 1 // 每天注册几个用户
-    
-    const estimatedDate = new Date(baseDate.getTime() + daysDiff * 24 * 60 * 60 * 1000)
-    const beijingTime = new Date(estimatedDate.getTime() + 8 * 60 * 60 * 1000)
-    return beijingTime.toISOString().split('T')[0] + ' (估算)'
+    // 如果 currentUser 中没有 created_at，显示提示
+    return '暂不可用'
   }
 
   useEffect(() => {
@@ -154,7 +68,7 @@ const Profile = () => {
 
   const handleLogout = () => {
     logout()
-    navigate('/', { replace: true })
+    navigate('/', { replace: true }) // 退出后重定向到首页
   }
 
   if (!currentUser) {
@@ -171,6 +85,8 @@ const Profile = () => {
       </div>
     )
   }
+
+  const registrationDate = getRegistrationDate()
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -202,11 +118,6 @@ const Profile = () => {
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
           <p style={{ color: '#666', marginBottom: '5px' }}>邮箱: {currentUser.email}</p>
           <p style={{ color: '#666' }}>注册时间: {registrationDate}</p>
-          {apiError && (
-            <p style={{ color: 'orange', fontSize: '0.8rem', marginTop: '5px' }}>
-              提示: {apiError}
-            </p>
-          )}
         </div>
       </div>
 
@@ -265,7 +176,7 @@ const Profile = () => {
               </li>
               <li>
                 <button
-                  onClick={handleLogout}
+                  onClick={handleLogout} // 使用新的退出处理函数
                   style={{
                     width: '100%',
                     padding: '12px 15px',
@@ -315,11 +226,6 @@ const Profile = () => {
                 <div className="info-item">
                   <label style={{ fontWeight: 'bold', color: '#666', display: 'block', marginBottom: '5px' }}>注册时间</label>
                   <p style={{ fontSize: '1.1rem' }}>{registrationDate}</p>
-                  {apiError && (
-                    <p style={{ color: 'orange', fontSize: '0.8rem', marginTop: '5px' }}>
-                      提示: {apiError}
-                    </p>
-                  )}
                 </div>
               </div>
             </div>
