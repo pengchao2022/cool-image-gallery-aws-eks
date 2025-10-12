@@ -43,4 +43,75 @@ router.get('/favorites', verifyToken, async (req, res) => {
     }
 });
 
+// 新增：获取用户注册时间
+router.get('/registration-date/:userId', verifyToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        console.log('🔍 查询用户注册时间，用户ID:', userId);
+        
+        // 查询数据库获取用户的注册时间
+        const result = await query(
+            'SELECT id, username, created_at FROM users WHERE id = $1',
+            [userId]
+        );
+        
+        console.log('📊 查询结果:', result.rows);
+        
+        if (result.rows.length > 0) {
+            res.json({ 
+                success: true,
+                user_id: result.rows[0].id,
+                username: result.rows[0].username,
+                created_at: result.rows[0].created_at 
+            });
+        } else {
+            res.status(404).json({ 
+                success: false,
+                error: '用户未找到' 
+            });
+        }
+    } catch (error) {
+        console.error('❌ 获取注册时间错误:', error);
+        res.status(500).json({ 
+            success: false,
+            error: '服务器错误' 
+        });
+    }
+});
+
+// 新增：获取用户详细信息（包含注册时间）
+router.get('/:id', verifyToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        console.log('🔍 获取用户详情，用户ID:', id);
+        
+        const result = await query(
+            'SELECT id, username, email, created_at FROM users WHERE id = $1',
+            [id]
+        );
+        
+        console.log('📊 用户详情结果:', result.rows);
+        
+        if (result.rows.length > 0) {
+            res.json({ 
+                success: true,
+                user: result.rows[0]
+            });
+        } else {
+            res.status(404).json({ 
+                success: false,
+                error: '用户未找到' 
+            });
+        }
+    } catch (error) {
+        console.error('❌ 获取用户信息错误:', error);
+        res.status(500).json({ 
+            success: false,
+            error: '服务器错误' 
+        });
+    }
+});
+
 export default router;

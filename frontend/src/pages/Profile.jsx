@@ -22,13 +22,15 @@ const Profile = () => {
 
   const fetchRegistrationDate = async () => {
     try {
-      console.log('🔄 获取用户注册时间...')
+      console.log('🔄 获取用户注册时间...用户ID:', currentUser.id)
       
-      // 方法1: 直接查询数据库获取注册时间
-      const response = await fetch(`/api/users/${currentUser.id}/registration-date`)
+      // 直接调用后端API获取注册时间
+      const response = await fetch(`/api/user/registration-date/${currentUser.id}`)
       
       if (response.ok) {
         const data = await response.json()
+        console.log('✅ 注册时间响应:', data)
+        
         if (data.created_at) {
           const beijingTime = formatToBeijingTime(data.created_at)
           setRegistrationDate(beijingTime)
@@ -36,41 +38,36 @@ const Profile = () => {
         }
       }
       
-      // 方法2: 如果上面的 API 不存在，使用备选方案
-      await fetchRegistrationDateAlternative()
+      // 如果专用API不存在，尝试通用用户信息API
+      await tryAlternativeAPI()
       
     } catch (error) {
       console.error('❌ 获取注册时间失败:', error)
-      await fetchRegistrationDateAlternative()
+      setRegistrationDate('获取失败')
     }
   }
 
-  const fetchRegistrationDateAlternative = async () => {
+  const tryAlternativeAPI = async () => {
     try {
-      // 备选方案：直接查询用户表获取完整用户信息
       const response = await fetch(`/api/users/${currentUser.id}`)
       
       if (response.ok) {
         const userData = await response.json()
         console.log('✅ 用户完整数据:', userData)
         
-        // 查找可能的注册时间字段
-        const dateFields = ['created_at', 'createdAt', 'registration_date', 'created', 'join_date']
-        for (const field of dateFields) {
-          if (userData[field]) {
-            const beijingTime = formatToBeijingTime(userData[field])
-            setRegistrationDate(beijingTime)
-            return
-          }
+        // 查找注册时间字段
+        if (userData.created_at) {
+          const beijingTime = formatToBeijingTime(userData.created_at)
+          setRegistrationDate(beijingTime)
+        } else {
+          setRegistrationDate('时间字段不存在')
         }
+      } else {
+        setRegistrationDate('API不可用')
       }
-      
-      // 如果还是找不到，显示基于用户ID的估算时间
-      setRegistrationDate(estimateRegistrationDate(currentUser.id))
-      
     } catch (error) {
-      console.error('❌ 备选方案也失败:', error)
-      setRegistrationDate(estimateRegistrationDate(currentUser.id))
+      console.error('❌ 备选API也失败:', error)
+      setRegistrationDate('网络错误')
     }
   }
 
@@ -94,17 +91,7 @@ const Profile = () => {
     }
   }
 
-  // 基于用户ID估算注册时间（临时方案）
-  const estimateRegistrationDate = (userId) => {
-    // 这是一个临时方案，根据用户ID估算大致注册时间
-    // 你可以根据实际情况调整这个逻辑
-    const baseDate = new Date('2024-01-01')
-    const estimatedDate = new Date(baseDate.getTime() + (userId - 1) * 24 * 60 * 60 * 1000) // 假设每天注册几个用户
-    
-    const beijingTime = new Date(estimatedDate.getTime() + 8 * 60 * 60 * 1000)
-    return beijingTime.toISOString().split('T')[0] + ' (估算)'
-  }
-
+  // 其他代码保持不变...
   useEffect(() => {
     if (currentUser && activeTab === 'comics') {
       fetchUserComics()
@@ -114,7 +101,6 @@ const Profile = () => {
   const fetchUserComics = async () => {
     try {
       setLoading(true)
-      // 模拟获取用户漫画数据
       setTimeout(() => {
         setUserComics([
           { id: 1, title: "我的第一部漫画", image_url: "https://picsum.photos/300/200?random=10", created_at: new Date().toISOString() },
@@ -181,6 +167,7 @@ const Profile = () => {
         </div>
       </div>
 
+      {/* 其余代码保持不变 */}
       <div className="profile-content" style={{
         display: 'grid',
         gridTemplateColumns: '250px 1fr',
