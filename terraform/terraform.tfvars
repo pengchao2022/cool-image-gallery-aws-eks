@@ -2,9 +2,6 @@ aws_region   = "us-east-1"
 project_name = "comic-website"
 environment  = "prod"
 
-# 数据库密码
-db_password = "your-secure-password-here"
-
 # VPC 配置
 vpc_cidr             = "10.0.0.0/16"
 public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
