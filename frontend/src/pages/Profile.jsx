@@ -12,14 +12,6 @@ const Profile = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
-  // 调试：打印 currentUser 结构
-  useEffect(() => {
-    if (currentUser) {
-      console.log('🔍 currentUser 完整结构:', currentUser)
-      console.log('📋 currentUser 所有属性:', Object.keys(currentUser))
-    }
-  }, [currentUser])
-
   // 时间转换函数 - UTC 转北京时间
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
@@ -48,11 +40,9 @@ const Profile = () => {
     }
     
     // 如果 currentUser 中没有 created_at，显示提示
-    console.log('❌ currentUser 中没有 created_at 字段')
     return '暂不可用'
   }
 
-  // 其余代码保持不变...
   useEffect(() => {
     if (currentUser && activeTab === 'comics') {
       fetchUserComics()
@@ -131,7 +121,6 @@ const Profile = () => {
         </div>
       </div>
 
-      {/* 其余代码保持不变... */}
       <div className="profile-content" style={{
         display: 'grid',
         gridTemplateColumns: '250px 1fr',
