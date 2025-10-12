@@ -10,27 +10,68 @@ const Profile = () => {
   const [activeTab, setActiveTab] = useState('info')
   const [userComics, setUserComics] = useState([])
   const [loading, setLoading] = useState(false)
+  const [userDetails, setUserDetails] = useState(null)
   const navigate = useNavigate()
 
-  // 新增：UTC 时间转北京时间函数
+  // 调试：打印 currentUser 内容
+  useEffect(() => {
+    console.log('🔍 currentUser 对象:', currentUser)
+    if (currentUser) {
+      console.log('📋 currentUser 所有属性:', Object.keys(currentUser))
+      console.log('⏰ 注册时间字段:', currentUser.created_at || '未找到')
+    }
+  }, [currentUser])
+
+  // 时间转换函数 - UTC 转北京时间
   const formatToBeijingTime = (utcTime) => {
-    if (!utcTime) return '未知时间'
+    if (!utcTime) {
+      return '未知时间'
+    }
     
     try {
       const date = new Date(utcTime)
+      
+      // 检查日期是否有效
+      if (isNaN(date.getTime())) {
+        return '无效时间格式'
+      }
+      
       // 转换为北京时间 (UTC+8)
       const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
       // 格式化为 YYYY-MM-DD
       return beijingTime.toISOString().split('T')[0]
     } catch (error) {
       console.error('时间转换错误:', error)
-      return '时间格式错误'
+      return '时间转换错误'
     }
   }
 
-  // 新增：从 API 获取用户详细信息（包含注册时间）
-  const [userDetails, setUserDetails] = useState(null)
-  
+  // 获取注册时间的函数
+  const getRegistrationDate = () => {
+    // 首先尝试从 userDetails 获取
+    if (userDetails?.created_at) {
+      return formatToBeijingTime(userDetails.created_at)
+    }
+    
+    // 然后尝试从 currentUser 获取
+    if (currentUser?.created_at) {
+      return formatToBeijingTime(currentUser.created_at)
+    }
+    
+    // 如果都没有，尝试其他可能的字段名
+    const possibleDateFields = ['registrationDate', 'createdAt', 'join_date', 'registered_at', 'created']
+    for (const field of possibleDateFields) {
+      if (currentUser?.[field]) {
+        console.log(`✅ 找到注册时间字段: ${field}`, currentUser[field])
+        return formatToBeijingTime(currentUser[field])
+      }
+    }
+    
+    // 如果还是找不到，显示提示信息
+    return '注册时间暂不可用'
+  }
+
+  // 获取用户详细信息
   useEffect(() => {
     if (currentUser) {
       fetchUserDetails()
@@ -39,12 +80,13 @@ const Profile = () => {
 
   const fetchUserDetails = async () => {
     try {
-      // 这里调用你的用户详情 API
-      // 假设你的 API 返回包含 created_at 字段的用户信息
+      console.log('🔄 尝试获取用户详情...')
+      // 尝试从 API 获取用户详细信息
       const response = await api.get(`/users/${currentUser.id}`)
+      console.log('✅ 用户详情响应:', response.data)
       setUserDetails(response.data)
     } catch (error) {
-      console.error('获取用户详情失败:', error)
+      console.error('❌ 获取用户详情失败:', error)
       // 如果 API 不可用，使用当前用户信息
       setUserDetails(currentUser)
     }
@@ -75,7 +117,7 @@ const Profile = () => {
 
   const handleLogout = () => {
     logout()
-    navigate('/', { replace: true })
+    navigate('/', { replace: true }) // 退出后重定向到首页
   }
 
   if (!currentUser) {
@@ -93,8 +135,8 @@ const Profile = () => {
     )
   }
 
-  // 获取注册时间（优先使用 userDetails，回退到 currentUser）
-  const registrationDate = userDetails?.created_at || currentUser.created_at
+  // 获取显示的注册时间
+  const displayRegistrationDate = getRegistrationDate()
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -125,7 +167,7 @@ const Profile = () => {
         <div>
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
           <p style={{ color: '#666', marginBottom: '5px' }}>邮箱: {currentUser.email}</p>
-          <p style={{ color: '#666' }}>注册时间: {formatToBeijingTime(registrationDate)}</p>
+          <p style={{ color: '#666' }}>注册时间: {displayRegistrationDate}</p>
         </div>
       </div>
 
@@ -184,7 +226,7 @@ const Profile = () => {
               </li>
               <li>
                 <button
-                  onClick={handleLogout}
+                  onClick={handleLogout} // 使用新的退出处理函数
                   style={{
                     width: '100%',
                     padding: '12px 15px',
@@ -233,7 +275,7 @@ const Profile = () => {
                 </div>
                 <div className="info-item">
                   <label style={{ fontWeight: 'bold', color: '#666', display: 'block', marginBottom: '5px' }}>注册时间</label>
-                  <p style={{ fontSize: '1.1rem' }}>{formatToBeijingTime(registrationDate)}</p>
+                  <p style={{ fontSize: '1.1rem' }}>{displayRegistrationDate}</p>
                 </div>
               </div>
             </div>
@@ -261,16 +303,34 @@ const Profile = () => {
                   </button>
                 </div>
               ) : (
-                <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+                <div className="comic-grid" style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gap: '20px'
+                }}>
                   {userComics.map(comic => (
-                    <div key={comic.id} className="comic-card">
+                    <div key={comic.id} className="comic-card" style={{
+                      border: '1px solid #eee',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      transition: 'transform 0.3s'
+                    }}>
                       <img 
                         src={comic.image_url} 
                         alt={comic.title} 
-                        className="comic-image"
+                        style={{
+                          width: '100%',
+                          height: '150px',
+                          objectFit: 'cover'
+                        }}
                       />
-                      <div className="comic-info">
-                        <div className="comic-title">{comic.title}</div>
+                      <div className="comic-info" style={{ padding: '15px' }}>
+                        <div className="comic-title" style={{ 
+                          fontWeight: 'bold', 
+                          marginBottom: '5px' 
+                        }}>
+                          {comic.title}
+                        </div>
                         <div className="comic-date" style={{ fontSize: '0.8rem', color: '#999' }}>
                           {formatToBeijingTime(comic.created_at)}
                         </div>
