@@ -4,4 +4,4 @@ metadata:
   name: frontend-config
   namespace: comic-website
 data:
-  VITE_API_URL: "http://backend-service.comic-website.svc.cluster.local:3001/api"
+  VITE_API_URL: "http://backend-service.comic-website.svc.cluster.local:3000/api"

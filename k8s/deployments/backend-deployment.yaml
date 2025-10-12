@@ -18,11 +18,11 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: backend
-        image: placeholder-backend-image
+        image: 319998871902.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend:latest
         ports:
         - containerPort: 3000
         env:
-        # 数据库配置 - 从 Secret 获取
+        # 数据库配置
         - name: DB_HOST
           valueFrom:
             secretKeyRef:
@@ -52,7 +52,7 @@ spec:
         - name: NODE_ENV
           value: "production"
         - name: PORT
-          value: "3000"
+          value: "3000"  # 改为 3000
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
@@ -68,12 +68,9 @@ spec:
             secretKeyRef:
               name: s3-secret
               key: bucket-name
-        # 前端 URL
-        - name: FRONTEND_URL
-          value: "http://comic-website-alb-123456789.us-east-1.elb.amazonaws.com"
-        # CORS 配置
-        - name: CORS_ORIGIN
-          value: "*"
+        # API 配置
+        - name: API_BASE_URL
+          value: "/api"
         resources:
           requests:
             memory: "256Mi"
@@ -84,12 +81,12 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: 3000
+            port: 3000  # 改为 3000
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 3000
+            port: 3000  # 改为 3000
           initialDelaySeconds: 5
           periodSeconds: 5
