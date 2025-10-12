@@ -2,8 +2,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 import { sequelize } from '../config/database.js';
+import { config } from '../config/constants.js';  // 导入配置
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = config.JWT_SECRET;  // 使用配置中的 JWT_SECRET
 
 export const register = async (req, res) => {
   try {
@@ -55,7 +56,7 @@ export const register = async (req, res) => {
         role: user.role || 'user'
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: config.JWT_EXPIRES_IN }  // 使用配置的过期时间 (7天)
     );
 
     res.status(201).json({
@@ -66,7 +67,7 @@ export const register = async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role || 'user',
-        created_at: user.created_at  // 新增这一行
+        created_at: user.created_at
       }
     });
 
@@ -117,7 +118,7 @@ export const login = async (req, res) => {
         role: user.role || 'user'
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: config.JWT_EXPIRES_IN }  // 使用配置的过期时间 (7天)
     );
 
     res.json({
@@ -128,7 +129,7 @@ export const login = async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role || 'user',
-        created_at: user.created_at  // 新增这一行
+        created_at: user.created_at
       }
     });
 
@@ -165,7 +166,7 @@ export const getProfile = async (req, res) => {
       username: user.username,
       email: user.email,
       role: user.role,
-      created_at: user.created_at  // 确保包含这个字段
+      created_at: user.created_at
     });
   } catch (error) {
     console.error('Get profile error:', error);
