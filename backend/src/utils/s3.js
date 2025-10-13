@@ -38,7 +38,7 @@ export class S3Service {
         Key: key,
         Body: optimizedImage,
         ContentType: 'image/jpeg',
-        ACL: 'private'
+        ACL: 'public-read'
       };
 
       console.log('📤 上传参数:', {
