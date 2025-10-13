@@ -28,10 +28,10 @@ resource "aws_s3_bucket_ownership_controls" "comic_storage" {
 resource "aws_s3_bucket_public_access_block" "comic_storage" {
   bucket = aws_s3_bucket.comic_storage.id
 
-  block_public_acls       = true
+  block_public_acls       = false
   block_public_policy     = false
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  ignore_public_acls      = false
+  restrict_public_buckets = false
 }
 
 # Bucket Versioning
