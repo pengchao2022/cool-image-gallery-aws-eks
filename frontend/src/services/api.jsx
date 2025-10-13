@@ -196,8 +196,34 @@ const createApiClient = () => {
       
       getById: (id) => request(`/comics/${id}`),
       
-      // 创建漫画（多文件版本）
-      createMultiple: (formData) => {
+      // 修复：创建漫画（多文件版本）
+      createMultiple: (comicData, files) => {
+        console.log('📤 创建漫画数据:', comicData)
+        console.log('📎 文件数量:', files?.length || 0)
+        
+        const formData = new FormData()
+        
+        // 添加文本字段
+        formData.append('title', comicData.title)
+        formData.append('description', comicData.description || '')
+        
+        // 添加文件
+        if (files && files.length > 0) {
+          files.forEach((file, index) => {
+            formData.append('images', file)
+            console.log(`📎 添加文件 ${index}:`, file.name, file.size, file.type)
+          })
+        }
+        
+        // 调试：检查 FormData 内容
+        for (let [key, value] of formData.entries()) {
+          if (value instanceof File) {
+            console.log(`📋 FormData[${key}]:`, value.name, value.size, value.type)
+          } else {
+            console.log(`📋 FormData[${key}]:`, value)
+          }
+        }
+        
         return uploadRequest('/comics', formData)
       },
       
