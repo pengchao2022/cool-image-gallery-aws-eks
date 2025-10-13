@@ -44,16 +44,16 @@ export class S3Service {
         Bucket: S3_CONFIG.bucket,
         Key: key,
         Body: optimizedImage,
-        ContentType: 'image/jpeg',
-        ACL: 'public-read'
+        ContentType: 'image/jpeg'
+        // 注意: 移除了 ACL 参数，因为存储桶禁用了 ACL
       };
 
       console.log('📤 上传参数:', {
         Bucket: uploadParams.Bucket,
         Key: uploadParams.Key,
         ContentType: uploadParams.ContentType,
-        BodyLength: uploadParams.Body.length,
-        ACL: uploadParams.ACL
+        BodyLength: uploadParams.Body.length
+        // 注意: 不再包含 ACL
       });
 
       console.log('🚀 开始上传到 S3...');
@@ -117,6 +117,9 @@ export class S3Service {
         console.error('❌ 网络错误 - 检查网络连接');
       } else if (error.code === 'TimeoutError') {
         console.error('❌ 超时错误 - 增加超时时间或重试');
+      } else if (error.code === 'AccessControlListNotSupported') {
+        console.error('❌ ACL 不被支持 - 存储桶禁用了 ACL');
+        console.error('❌ 解决方案: 从上传参数中移除 ACL 设置');
       }
       
       console.error('❌ 完整错误堆栈:', error.stack);
