@@ -8,6 +8,7 @@ const Browse = () => {
   const { currentUser } = useContext(AuthContext)
   const [comics, setComics] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -17,22 +18,41 @@ const Browse = () => {
   const fetchComics = async () => {
     try {
       setLoading(true)
-      // 模拟获取漫画数据
-      setTimeout(() => {
-        setComics([
-          { id: 1, title: "奇幻冒险", author: "漫画家A", image_url: "https://picsum.photos/300/200?random=1" },
-          { id: 2, title: "科幻未来", author: "漫画家B", image_url: "https://picsum.photos/300/200?random=2" },
-          { id: 3, title: "校园生活", author: "漫画家C", image_url: "https://picsum.photos/300/200?random=3" },
-          { id: 4, title: "武侠传奇", author: "漫画家D", image_url: "https://picsum.photos/300/200?random=4" },
-          { id: 5, title: "悬疑推理", author: "漫画家E", image_url: "https://picsum.photos/300/200?random=5" },
-          { id: 6, title: "浪漫爱情", author: "漫画家F", image_url: "https://picsum.photos/300/200?random=6" }
-        ])
-        setLoading(false)
-      }, 1000)
+      setError(null)
+      
+      // 调用真实的 API 获取漫画数据
+      const response = await fetch('/api/comics')
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        setComics(data.comics)
+        console.log('✅ 成功加载漫画数据:', data.comics.length, '个漫画')
+      } else {
+        throw new Error(data.message || '获取漫画数据失败')
+      }
     } catch (error) {
-      console.error('获取漫画列表失败:', error)
+      console.error('❌ 获取漫画列表失败:', error)
+      setError('加载漫画失败，请刷新页面重试')
+    } finally {
       setLoading(false)
     }
+  }
+
+  // 处理图片加载失败
+  const handleImageError = (e, comic) => {
+    console.log(`❌ 图片加载失败: ${comic.title}`, e.target.src)
+    e.target.style.display = 'none'
+    // 可以在这里设置一个默认的占位图片
+  }
+
+  // 处理图片加载成功
+  const handleImageLoad = (e, comic) => {
+    console.log(`✅ 图片加载成功: ${comic.title}`)
   }
 
   return (
@@ -65,6 +85,16 @@ const Browse = () => {
           <span style={{ color: '#666' }}>共 {comics.length} 部作品</span>
         </div>
         
+        {error && (
+          <div style={{ textAlign: 'center', padding: '30px', color: '#e74c3c' }}>
+            <i className="fas fa-exclamation-triangle" style={{ fontSize: '2rem', marginBottom: '15px' }}></i>
+            <p>{error}</p>
+            <button className="btn btn-primary" onClick={fetchComics} style={{ marginTop: '15px' }}>
+              重试
+            </button>
+          </div>
+        )}
+        
         {loading ? (
           <div style={{ textAlign: 'center', padding: '50px' }}>
             <i className="fas fa-spinner fa-spin" style={{ fontSize: '2rem', color: 'var(--primary)' }}></i>
@@ -75,13 +105,21 @@ const Browse = () => {
             <i className="fas fa-book" style={{ fontSize: '3rem', marginBottom: '20px' }}></i>
             <h3>暂无漫画作品</h3>
             <p>成为第一个上传漫画的用户吧！</p>
-            {!currentUser && (
+            {!currentUser ? (
               <button 
                 className="btn btn-primary"
                 onClick={() => navigate('/register')}
                 style={{ marginTop: '20px' }}
               >
                 立即注册
+              </button>
+            ) : (
+              <button 
+                className="btn btn-primary"
+                onClick={() => navigate('/upload')}
+                style={{ marginTop: '20px' }}
+              >
+                上传作品
               </button>
             )}
           </div>
@@ -90,13 +128,18 @@ const Browse = () => {
             {comics.map(comic => (
               <div key={comic.id} className="comic-card">
                 <img 
-                  src={comic.image_url} 
+                  src={comic.image_urls && comic.image_urls[0]} 
                   alt={comic.title} 
                   className="comic-image"
+                  onError={(e) => handleImageError(e, comic)}
+                  onLoad={(e) => handleImageLoad(e, comic)}
                 />
                 <div className="comic-info">
                   <div className="comic-title">{comic.title}</div>
-                  <div className="comic-author">作者: {comic.author}</div>
+                  <div className="comic-author">作者: 用户{comic.user_id}</div>
+                  {comic.views !== undefined && (
+                    <div className="comic-views">浏览: {comic.views}次</div>
+                  )}
                 </div>
               </div>
             ))}

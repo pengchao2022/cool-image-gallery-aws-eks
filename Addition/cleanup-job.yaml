@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cleanup-placeholder-images-v2
+  namespace: comic-website
+spec:
+  template:
+    spec:
+      containers:
+      - name: postgres-client
+        image: postgres:15
+        env:
+        - name: PGHOST
+          value: "comic-website-prod-db.c8hmw642ur0e.us-east-1.rds.amazonaws.com"
+        - name: PGUSER
+          value: "comicadmin"
+        - name: PGPASSWORD
+          value: "Hello_2025"
+        - name: PGDATABASE
+          value: "comicdb"
+        command: 
+        - /bin/bash
+        - -c
+        - |
+          # 先查看当前状态
+          echo "=== 清理前状态 ==="
+          psql -c "SELECT COUNT(*) as total_comics FROM comics;"
+          psql -c "SELECT COUNT(*) as placeholder_comics FROM comics WHERE image_urls[1] LIKE '%picsum.photos%';"
+          psql -c "SELECT COUNT(*) as real_image_comics FROM comics WHERE image_urls[1] LIKE '%s3.amazonaws.com%';"
+          
+          echo "=== 开始清理占位图片记录 ==="
+          # 删除所有使用占位图片的漫画记录
+          psql -c "DELETE FROM comics WHERE image_urls[1] LIKE '%picsum.photos%';"
+          
+          echo "=== 清理后状态 ==="
+          psql -c "SELECT COUNT(*) as remaining_comics FROM comics;"
+          psql -c "SELECT COUNT(*) as real_image_comics FROM comics WHERE image_urls[1] LIKE '%s3.amazonaws.com%';"
+      restartPolicy: Never
+  backoffLimit: 1
