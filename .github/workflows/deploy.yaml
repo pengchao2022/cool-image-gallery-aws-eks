@@ -345,8 +345,15 @@ jobs:
           echo "🚀 Running database migrations..."
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
           
-          # 创建临时的 migration job 文件
-          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
+          echo "使用的后端镜像: $BACKEND_IMAGE"
+          
+          # 使用 envsubst 替换迁移文件中的镜像占位符
+          export BACKEND_IMAGE="$BACKEND_IMAGE"
+          envsubst '${BACKEND_IMAGE}' < k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
+          
+          # 验证替换是否成功
+          echo "=== 验证镜像替换 ==="
+          grep -n "image:" /tmp/db-migration-job.yaml
           
           # 应用 migration job
           kubectl apply -f /tmp/db-migration-job.yaml
@@ -358,10 +365,6 @@ jobs:
             echo "✅ Migration completed successfully"
             echo "=== Migration Logs ==="
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            
-            # 验证 role 字段是否存在
-            echo "=== Verifying role column ==="
-            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }} | grep -i "role" || echo "⚠️  No role-related output in logs"
             
             # 清理 migration job
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
