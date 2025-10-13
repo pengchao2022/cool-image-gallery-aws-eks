@@ -86,6 +86,12 @@ const Profile = () => {
           // 结构: {success: true, comics: [...]}
           allComics = responseData.comics
           console.log('📚 从 comics 字段获取漫画数据:', allComics)
+          
+          // 调试：查看第一个漫画的完整结构
+          if (allComics.length > 0) {
+            console.log('🔍 第一个漫画的完整数据结构:', allComics[0])
+            console.log('🔍 第一个漫画的所有字段:', Object.keys(allComics[0]))
+          }
         } else if (responseData.data && Array.isArray(responseData.data)) {
           // 结构: {success: true, data: [...]}
           allComics = responseData.data
@@ -148,26 +154,45 @@ const Profile = () => {
 
   // 获取图片URL - 修复图片显示问题
   const getImageUrl = (comic) => {
-    // 检查不同的图片URL字段
-    const imageUrl = comic.image_url || comic.cover_url || comic.coverImage || comic.image;
-    console.log(`🖼️ 漫画 "${comic.title}" 的图片URL:`, imageUrl);
+    // 调试：查看漫画对象的所有字段
+    console.log(`🔍 漫画 "${comic.title}" 的所有字段:`, Object.keys(comic));
+    console.log(`🔍 漫画 "${comic.title}" 的完整数据:`, comic);
     
-    if (imageUrl) {
-      // 如果URL是相对路径，添加基础URL
-      if (imageUrl.startsWith('/')) {
-        return `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
+    // 检查所有可能的图片URL字段
+    const possibleImageFields = [
+      'image_url', 'cover_url', 'coverImage', 'image', 
+      'cover', 'thumbnail', 'picture', 'photo',
+      'file_url', 'file_path', 'url', 'imageUrl',
+      'coverImageUrl', 'thumbnail_url'
+    ];
+    
+    for (const field of possibleImageFields) {
+      if (comic[field]) {
+        console.log(`✅ 找到图片字段 "${field}":`, comic[field]);
+        const imageUrl = comic[field];
+        
+        // 如果URL是相对路径，添加基础URL
+        if (imageUrl.startsWith('/')) {
+          const fullUrl = `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
+          console.log(`🖼️ 完整图片URL:`, fullUrl);
+          return fullUrl;
+        }
+        
+        console.log(`🖼️ 图片URL:`, imageUrl);
+        return imageUrl;
       }
-      return imageUrl;
     }
     
-    // 如果没有图片，使用默认的占位图
-    return 'https://via.placeholder.com/300x200?text=No+Image';
+    console.warn(`⚠️ 漫画 "${comic.title}" 没有找到图片URL字段`);
+    
+    // 如果没有图片，使用默认的占位图（使用更可靠的占位图服务）
+    return 'https://placehold.co/300x200/6c5ce7/white?text=No+Image&font=roboto';
   }
 
   // 处理图片加载错误
   const handleImageError = (e, comic) => {
     console.error(`❌ 图片加载失败: ${comic.title}`, e);
-    e.target.src = 'https://via.placeholder.com/300x200?text=Image+Error';
+    e.target.src = 'https://placehold.co/300x200/d63031/white?text=Image+Error&font=roboto';
     e.target.alt = `无法加载图片: ${comic.title}`;
   }
 
