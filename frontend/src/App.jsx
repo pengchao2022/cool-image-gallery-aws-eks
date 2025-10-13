@@ -9,6 +9,8 @@ import Profile from './pages/Profile.jsx'
 import Upload from './pages/Upload.jsx'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
+import AuthError from './pages/AuthError.jsx'  // 导入新的认证错误页面
+import UploadError from './pages/UploadError.jsx'  // 导入上传错误页面
 import './App.css'
 
 // 修复的 ProtectedRoute 组件
@@ -37,10 +39,17 @@ function App() {
           <Header />
           <main style={{ flex: 1 }}>
             <Routes>
+              {/* 公开路由 */}
               <Route path="/" element={<Home />} />
               <Route path="/browse" element={<Browse />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              
+              {/* 错误页面路由 - 公开访问 */}
+              <Route path="/auth-error" element={<AuthError />} />
+              <Route path="/upload-error" element={<UploadError />} />
+              
+              {/* 受保护的路由 */}
               <Route 
                 path="/profile" 
                 element={
@@ -57,6 +66,8 @@ function App() {
                   </ProtectedRoute>
                 } 
               />
+              
+              {/* 404 路由 */}
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>

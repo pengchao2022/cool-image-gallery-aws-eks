@@ -28,22 +28,47 @@ const Header = () => {
       token: token ? `存在 (${token.length} 字符)` : '不存在'
     })
     
-    // 决策逻辑
+    // 改进的决策逻辑 - 跳转到专门的错误页面
     if (currentUser && token) {
       console.log('✅ 情况1: Context 和 Token 都有效，跳转到个人资料')
       navigate('/profile')
     } else if (userFromStorage && token) {
       console.log('🔄 情况2: Context 丢失但存储中有数据，刷新状态后跳转')
       refreshUser()
-      setTimeout(() => navigate('/profile'), 100) // 稍等片刻让状态更新
+      setTimeout(() => navigate('/profile'), 100)
+    } else if (userFromStorage && !token) {
+      console.log('❌ 情况3: 有用户数据但无 token，跳转到认证错误页面')
+      navigate('/auth-error', {
+        state: {
+          error: '用户数据存在但认证Token丢失',
+          from: 'header-avatar-click',
+          hasUserData: true,
+          contextUser: currentUser ? `ID: ${currentUser.id}` : 'null',
+          storageUser: userFromStorage ? `ID: ${userFromStorage.id}` : 'null'
+        }
+      })
     } else if (token && !userFromStorage) {
-      console.log('❌ 情况3: 有 Token 但无用户数据，数据损坏，清除并跳转登录')
-      localStorage.removeItem('authToken')
-      localStorage.removeItem('user')
-      navigate('/login')
+      console.log('❌ 情况4: 有 Token 但无用户数据，数据损坏，跳转到认证错误页面')
+      navigate('/auth-error', {
+        state: {
+          error: '认证Token存在但用户数据丢失或损坏',
+          from: 'header-avatar-click',
+          hasUserData: false,
+          contextUser: currentUser ? `ID: ${currentUser.id}` : 'null',
+          storageUser: 'null'
+        }
+      })
     } else {
-      console.log('❌ 情况4: 完全未认证，跳转到登录')
-      navigate('/login')
+      console.log('❌ 情况5: 完全未认证，跳转到认证错误页面')
+      navigate('/auth-error', {
+        state: {
+          error: '未检测到有效的登录信息',
+          from: 'header-avatar-click',
+          hasUserData: false,
+          contextUser: 'null',
+          storageUser: 'null'
+        }
+      })
     }
   }
 
