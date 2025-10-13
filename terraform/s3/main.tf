@@ -24,7 +24,7 @@ resource "aws_s3_bucket_ownership_controls" "comic_storage" {
   }
 }
 
-# Bucket Public Access Block
+# Bucket Public Access Block - 保持安全设置
 resource "aws_s3_bucket_public_access_block" "comic_storage" {
   bucket = aws_s3_bucket.comic_storage.id
 
@@ -54,7 +54,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "comic_storage" {
   }
 }
 
-# Lifecycle Configuration
 # Lifecycle Configuration
 resource "aws_s3_bucket_lifecycle_configuration" "comic_storage" {
   bucket = aws_s3_bucket.comic_storage.id
@@ -119,13 +118,14 @@ resource "aws_s3_bucket_cors_configuration" "comic_storage" {
   }
 }
 
-# Bucket Policy for EKS access
+# Bucket Policy for EKS access and limited public read
 resource "aws_s3_bucket_policy" "comic_storage" {
   bucket = aws_s3_bucket.comic_storage.id
   policy = data.aws_iam_policy_document.comic_storage.json
 }
 
 data "aws_iam_policy_document" "comic_storage" {
+  # 1. 允许 EKS Node Group 完全访问
   statement {
     sid    = "AllowEKSNodeGroup"
     effect = "Allow"
@@ -148,9 +148,10 @@ data "aws_iam_policy_document" "comic_storage" {
     ]
   }
 
+  # 2. 允许公众只读取 comics/ 路径下的对象（允许 HTTP 和 HTTPS）
   statement {
-    sid    = "DenyNonSSLRequests"
-    effect = "Deny"
+    sid    = "AllowPublicReadComicsOnly"
+    effect = "Allow"
 
     principals {
       type        = "*"
@@ -158,18 +159,11 @@ data "aws_iam_policy_document" "comic_storage" {
     }
 
     actions = [
-      "s3:*",
+      "s3:GetObject",
     ]
 
     resources = [
-      aws_s3_bucket.comic_storage.arn,
-      "${aws_s3_bucket.comic_storage.arn}/*",
+      "${aws_s3_bucket.comic_storage.arn}/comics/*",
     ]
-
-    condition {
-      test     = "Bool"
-      variable = "aws:SecureTransport"
-      values   = ["false"]
-    }
   }
 }
