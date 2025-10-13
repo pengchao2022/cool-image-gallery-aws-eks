@@ -63,11 +63,34 @@ const Profile = () => {
         }
       })
       
-      console.log('📚 获取到的所有漫画响应:', response.data)
+      console.log('📡 完整响应对象:', response)
+      console.log('📡 响应状态:', response.status)
+      console.log('📡 响应数据:', response.data)
+      console.log('📡 响应数据类型:', typeof response.data)
       
-      if (response.data && response.data.success) {
-        // 修复：使用正确的数据结构 response.data.comics 而不是 response.data.data
-        const allComics = response.data.comics || []
+      // 修复：直接检查 response.data 是否存在
+      if (response.data) {
+        console.log('✅ 成功获取到响应数据')
+        
+        // 检查不同的可能数据结构
+        let allComics = []
+        
+        if (response.data.comics && Array.isArray(response.data.comics)) {
+          // 结构: {success: true, comics: [...]}
+          allComics = response.data.comics
+          console.log('📚 从 comics 字段获取漫画数据:', allComics)
+        } else if (response.data.data && Array.isArray(response.data.data)) {
+          // 结构: {success: true, data: [...]}
+          allComics = response.data.data
+          console.log('📚 从 data 字段获取漫画数据:', allComics)
+        } else if (Array.isArray(response.data)) {
+          // 结构: 直接返回数组
+          allComics = response.data
+          console.log('📚 直接获取漫画数据:', allComics)
+        } else {
+          console.warn('⚠️ 未知的响应结构:', response.data)
+          allComics = []
+        }
         
         console.log('📖 所有漫画列表:', allComics)
         
@@ -84,8 +107,8 @@ const Profile = () => {
         console.log('🎯 过滤后的用户漫画:', myComics)
         setUserComics(myComics)
       } else {
-        console.error('❌ API 返回失败:', response.data)
-        setError('获取漫画数据失败')
+        console.error('❌ 响应数据为空:', response)
+        setError('获取漫画数据失败：响应数据为空')
         setUserComics([])
       }
     } catch (error) {
@@ -95,6 +118,10 @@ const Profile = () => {
         console.error('📡 错误状态:', error.response.status)
         console.error('📄 错误数据:', error.response.data)
         console.error('🔗 请求URL:', error.response.config?.url)
+      } else if (error.request) {
+        console.error('📡 网络错误，无响应:', error.request)
+      } else {
+        console.error('📡 其他错误:', error.message)
       }
       
       setError('获取漫画数据失败，请检查网络连接')
