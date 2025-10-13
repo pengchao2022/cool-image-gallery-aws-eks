@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { User } from '../models/User.js';
+import User from '../models/User.js';  // 修改：改为默认导入
 import { sequelize } from '../config/database.js';
 import { config } from '../config/constants.js';  // 导入配置
 

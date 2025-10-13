@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { User } from '../models/User.js';
+import User from '../models/User.js';  // 修改：改为默认导入
 import { config } from '../config/constants.js';
 
 // 添加详细的调试信息
