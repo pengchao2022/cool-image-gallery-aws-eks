@@ -64,7 +64,6 @@ const Profile = () => {
       })
       
       console.log('📡 完整响应对象:', response)
-      console.log('📡 响应数据类型:', typeof response)
       
       // 修复：直接使用 response 对象，因为 response 本身就是数据
       let responseData = response;
@@ -145,6 +144,31 @@ const Profile = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  // 获取图片URL - 修复图片显示问题
+  const getImageUrl = (comic) => {
+    // 检查不同的图片URL字段
+    const imageUrl = comic.image_url || comic.cover_url || comic.coverImage || comic.image;
+    console.log(`🖼️ 漫画 "${comic.title}" 的图片URL:`, imageUrl);
+    
+    if (imageUrl) {
+      // 如果URL是相对路径，添加基础URL
+      if (imageUrl.startsWith('/')) {
+        return `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
+      }
+      return imageUrl;
+    }
+    
+    // 如果没有图片，使用默认的占位图
+    return 'https://via.placeholder.com/300x200?text=No+Image';
+  }
+
+  // 处理图片加载错误
+  const handleImageError = (e, comic) => {
+    console.error(`❌ 图片加载失败: ${comic.title}`, e);
+    e.target.src = 'https://via.placeholder.com/300x200?text=Image+Error';
+    e.target.alt = `无法加载图片: ${comic.title}`;
   }
 
   // 处理漫画删除
@@ -417,16 +441,14 @@ const Profile = () => {
                       boxShadow: '0 3px 10px rgba(0,0,0,0.1)'
                     }}>
                       <img 
-                        src={comic.image_url || comic.cover_url || '/default-comic-cover.jpg'} 
+                        src={getImageUrl(comic)}
                         alt={comic.title} 
                         style={{
                           width: '100%',
                           height: '180px',
                           objectFit: 'cover'
                         }}
-                        onError={(e) => {
-                          e.target.src = '/default-comic-cover.jpg'
-                        }}
+                        onError={(e) => handleImageError(e, comic)}
                       />
                       <div className="comic-info" style={{ padding: '15px' }}>
                         <div className="comic-title" style={{ 
