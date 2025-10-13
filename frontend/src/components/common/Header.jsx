@@ -3,14 +3,48 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AuthContext } from '../../context/AuthContext.jsx'
 
 const Header = () => {
-  const { currentUser } = useContext(AuthContext)
+  const { currentUser, refreshUser } = useContext(AuthContext)
   const navigate = useNavigate()
 
   console.log('🔍 Header当前用户:', currentUser)
 
   const handleAvatarClick = () => {
-    console.log('👤 头像被点击了，跳转到个人资料')
-    navigate('/profile')
+    console.log('👤 头像被点击了，开始验证...')
+    
+    // 详细检查认证状态
+    const token = localStorage.getItem('authToken')
+    const userStr = localStorage.getItem('user')
+    let userFromStorage = null
+    
+    try {
+      userFromStorage = userStr ? JSON.parse(userStr) : null
+    } catch (e) {
+      console.error('❌ 解析用户数据失败:', e)
+    }
+    
+    console.log('详细认证检查:', {
+      contextUser: currentUser ? `ID: ${currentUser.id}` : 'null',
+      storageUser: userFromStorage ? `ID: ${userFromStorage.id}` : 'null',
+      token: token ? `存在 (${token.length} 字符)` : '不存在'
+    })
+    
+    // 决策逻辑
+    if (currentUser && token) {
+      console.log('✅ 情况1: Context 和 Token 都有效，跳转到个人资料')
+      navigate('/profile')
+    } else if (userFromStorage && token) {
+      console.log('🔄 情况2: Context 丢失但存储中有数据，刷新状态后跳转')
+      refreshUser()
+      setTimeout(() => navigate('/profile'), 100) // 稍等片刻让状态更新
+    } else if (token && !userFromStorage) {
+      console.log('❌ 情况3: 有 Token 但无用户数据，数据损坏，清除并跳转登录')
+      localStorage.removeItem('authToken')
+      localStorage.removeItem('user')
+      navigate('/login')
+    } else {
+      console.log('❌ 情况4: 完全未认证，跳转到登录')
+      navigate('/login')
+    }
   }
 
   return (
@@ -55,7 +89,20 @@ const Header = () => {
                 <div 
                   className="user-avatar"
                   onClick={handleAvatarClick}
-                  title="点击查看个人信息"
+                  title={`点击查看 ${currentUser.username} 的个人信息`}
+                  style={{ 
+                    cursor: 'pointer',
+                    background: 'var(--primary)',
+                    color: 'white',
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 'bold',
+                    fontSize: '16px'
+                  }}
                 >
                   {currentUser.username?.[0]?.toUpperCase() || 'U'}
                 </div>

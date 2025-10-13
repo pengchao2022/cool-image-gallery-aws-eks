@@ -1,59 +1,115 @@
-import api from './api.jsx'
+import React, { createContext, useState, useEffect } from 'react'
+import authService from '../services/auth.jsx'
 
-class AuthService {
-  async login(email, password) {
+export const AuthContext = createContext()
+
+export const AuthProvider = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    initializeAuth()
+  }, [])
+
+  const initializeAuth = () => {
     try {
-      const response = await api.auth.login(email, password)
+      const token = authService.getToken()
+      const user = authService.getCurrentUser()
       
-      if (response.token) {
-        localStorage.setItem('authToken', response.token)
-        localStorage.setItem('user', JSON.stringify(response.user))
+      console.log('🔐 AuthContext 初始化检查:', {
+        token: token ? `存在 (${token.length} 字符)` : '不存在',
+        user: user ? `存在 (ID: ${user.id}, 用户名: ${user.username})` : '不存在'
+      })
+      
+      if (user && token) {
+        console.log('✅ 认证有效，设置当前用户')
+        setCurrentUser(user)
+      } else {
+        console.log('❌ 认证数据不完整，清除可能存在的无效数据')
+        if (token && !user) {
+          console.log('⚠️  有 token 但没有用户信息，清除数据')
+          authService.logout()
+        }
+        setCurrentUser(null)
       }
-      
+    } catch (error) {
+      console.error('❌ 认证初始化失败:', error)
+      authService.logout()
+      setCurrentUser(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const login = async (email, password) => {
+    try {
+      setError(null)
+      console.log('🔐 开始登录...')
+      const response = await authService.login(email, password)
+      console.log('✅ 登录成功，设置用户:', response.user)
+      setCurrentUser(response.user)
       return response
     } catch (error) {
-      this.logout()
+      console.error('❌ 登录失败:', error)
+      setError(error.message)
       throw error
     }
   }
 
-  async register(username, email, password) {
+  const register = async (username, email, password) => {
     try {
-      const response = await api.auth.register(username, email, password)
-      
-      if (response.token) {
-        localStorage.setItem('authToken', response.token)
-        localStorage.setItem('user', JSON.stringify(response.user))
-      }
-      
+      setError(null)
+      console.log('🔐 开始注册...')
+      const response = await authService.register(username, email, password)
+      console.log('✅ 注册成功，设置用户:', response.user)
+      setCurrentUser(response.user)
       return response
     } catch (error) {
+      console.error('❌ 注册失败:', error)
+      setError(error.message)
       throw error
     }
   }
 
-  logout() {
-    localStorage.removeItem('authToken')
-    localStorage.removeItem('user')
+  const logout = () => {
+    console.log('🔐 用户登出')
+    authService.logout()
+    setCurrentUser(null)
+    setError(null)
   }
 
-  getCurrentUser() {
-    try {
-      const userStr = localStorage.getItem('user')
-      return userStr ? JSON.parse(userStr) : null
-    } catch (error) {
-      console.error('解析用户数据失败:', error)
-      return null
+  // 强制刷新用户状态
+  const refreshUser = () => {
+    console.log('🔄 手动刷新用户状态')
+    const user = authService.getCurrentUser()
+    const token = authService.getToken()
+    
+    console.log('刷新检查:', {
+      user: user ? `ID: ${user.id}` : '不存在',
+      token: token ? '存在' : '不存在'
+    })
+    
+    if (user && token) {
+      setCurrentUser(user)
+    } else {
+      setCurrentUser(null)
     }
   }
 
-  getToken() {
-    return localStorage.getItem('authToken')
+  const value = {
+    currentUser,
+    loading,
+    error,
+    login,
+    register,
+    logout,
+    refreshUser
   }
 
-  isAuthenticated() {
-    return !!this.getToken()
-  }
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
-
-export default new AuthService()
