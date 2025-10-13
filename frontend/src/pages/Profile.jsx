@@ -56,8 +56,8 @@ const Profile = () => {
       console.log('🔄 开始获取用户漫画...')
       console.log('👤 当前用户ID:', currentUser.id)
       
-      // 调用 API 获取所有漫画
-      const response = await api.get('/api/comics', {
+      // 修复：移除重复的 /api 前缀，因为 api.jsx 中已经包含了基础路径
+      const response = await api.get('/comics', {  // 改为 /comics 而不是 /api/comics
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -87,6 +87,7 @@ const Profile = () => {
       if (error.response) {
         console.error('📡 错误状态:', error.response.status)
         console.error('📄 错误数据:', error.response.data)
+        console.error('🔗 请求URL:', error.response.config?.url)
       }
       
       setError('获取漫画数据失败，请检查网络连接')
@@ -111,7 +112,8 @@ const Profile = () => {
     try {
       console.log('🗑️ 开始删除漫画:', comicId)
       
-      const response = await api.delete(`/api/comics/${comicId}`, {
+      // 修复：移除重复的 /api 前缀
+      const response = await api.delete(`/comics/${comicId}`, {  // 改为 /comics 而不是 /api/comics
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -131,6 +133,7 @@ const Profile = () => {
       if (error.response) {
         console.error('📡 删除错误状态:', error.response.status)
         console.error('📄 删除错误数据:', error.response.data)
+        console.error('🔗 删除请求URL:', error.response.config?.url)
       }
       alert('删除失败，请检查网络连接')
     }
