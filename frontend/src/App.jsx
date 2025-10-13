@@ -10,6 +10,7 @@ import Upload from './pages/Upload.jsx'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import AuthError from './pages/AuthError.jsx'  // 导入新的认证错误页面
+import UploadError from './pages/UploadError.jsx' // 导入上传错误界面
 import './App.css'
 
 // 修复的 ProtectedRoute 组件
