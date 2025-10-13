@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
-import { config } from '../config/constants.js';  // 导入配置
+import { config } from '../config/constants.js';
 
 // 添加详细的调试信息
 console.log('=== AUTH.JS 调试信息 ===');
@@ -13,7 +13,13 @@ console.log('========================');
 
 export const authenticate = async (req, res, next) => {
   try {
-    console.log('🔐 authenticate 中间件被调用');
+    console.log('🔐 ========== AUTHENTICATE 中间件开始 ==========');
+    console.log('🔐 请求路径:', req.path);
+    console.log('🔐 请求方法:', req.method);
+    console.log('🔐 Content-Type:', req.headers['content-type']);
+    console.log('🔐 完整的 Authorization header:', req.headers.authorization);
+    console.log('🔐 所有 headers:', JSON.stringify(req.headers, null, 2));
+    
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
     if (!token) {
@@ -24,10 +30,14 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    console.log('🔑 验证 token, 使用 JWT_SECRET:', config.JWT_SECRET ? '已设置' : '未设置');
+    console.log('🔑 提取的 token:', token.substring(0, 20) + '...');
+    console.log('🔑 Token 长度:', token.length);
+    console.log('🔑 使用的 JWT_SECRET:', config.JWT_SECRET ? `已设置 (长度: ${config.JWT_SECRET.length})` : '未设置');
     
-    const decoded = jwt.verify(token, config.JWT_SECRET);  // 使用配置的 JWT_SECRET
-    console.log('✅ Token 解码成功, userId:', decoded.userId);
+    const decoded = jwt.verify(token, config.JWT_SECRET);
+    console.log('✅ Token 解码成功');
+    console.log('✅ decoded payload:', decoded);
+    console.log('✅ userId:', decoded.userId);
     
     const user = await User.findById(decoded.userId);
     
@@ -39,12 +49,29 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    console.log('✅ 用户验证成功:', user.username);
+    console.log('✅ 用户验证成功:', {
+      id: user.id,
+      username: user.username,
+      email: user.email
+    });
+    
     req.user = user;
+    console.log('🔐 ========== AUTHENTICATE 中间件结束 ==========');
     next();
   } catch (error) {
     console.error('❌ Token 验证错误:', error.message);
-    console.error('❌ 错误详情:', error);
+    console.error('❌ 错误名称:', error.name);
+    console.error('❌ 错误堆栈:', error.stack);
+    
+    // 更详细的错误分类
+    if (error.name === 'JsonWebTokenError') {
+      console.error('❌ JWT 格式错误');
+    } else if (error.name === 'TokenExpiredError') {
+      console.error('❌ Token 已过期');
+    } else if (error.name === 'NotBeforeError') {
+      console.error('❌ Token 尚未生效');
+    }
+    
     res.status(401).json({ 
       success: false, 
       message: 'Invalid token.' 
@@ -54,17 +81,22 @@ export const authenticate = async (req, res, next) => {
 
 export const optionalAuth = async (req, res, next) => {
   try {
+    console.log('🔐 [optionalAuth] 被调用');
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
     if (token) {
+      console.log('🔐 [optionalAuth] 找到 token，尝试验证');
       const decoded = jwt.verify(token, config.JWT_SECRET);
       const user = await User.findById(decoded.userId);
       req.user = user;
+      console.log('🔐 [optionalAuth] 用户设置完成');
+    } else {
+      console.log('🔐 [optionalAuth] 未找到 token，跳过认证');
     }
     
     next();
   } catch (error) {
-    console.error('Optional auth error:', error);
+    console.error('🔐 [optionalAuth] 错误:', error.message);
     next();
   }
 };
