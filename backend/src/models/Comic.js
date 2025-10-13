@@ -1,4 +1,3 @@
-// src/models/Comic.js
 import { DataTypes } from 'sequelize';
 import { sequelize } from '../config/database.js';
 
@@ -25,8 +24,9 @@ const Comic = sequelize.define('Comic', {
     allowNull: false
   },
   image_urls: {
-    type: DataTypes.JSONB, // 或者 DataTypes.ARRAY(DataTypes.STRING)
-    allowNull: false
+    type: DataTypes.ARRAY(DataTypes.TEXT), // 改为数组类型
+    allowNull: false,
+    defaultValue: [] // 添加默认值
   },
   views: {
     type: DataTypes.INTEGER,
