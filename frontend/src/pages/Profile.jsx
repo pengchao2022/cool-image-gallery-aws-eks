@@ -10,6 +10,7 @@ const Profile = () => {
   const [activeTab, setActiveTab] = useState('info')
   const [userComics, setUserComics] = useState([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const navigate = useNavigate()
 
   // 时间转换函数 - UTC 转北京时间
@@ -34,12 +35,9 @@ const Profile = () => {
 
   // 获取注册时间 - 从 currentUser 中获取
   const getRegistrationDate = () => {
-    // 如果 currentUser 中有 created_at，直接使用
     if (currentUser?.created_at) {
       return formatToBeijingTime(currentUser.created_at)
     }
-    
-    // 如果 currentUser 中没有 created_at，显示提示
     return '暂不可用'
   }
 
@@ -49,21 +47,98 @@ const Profile = () => {
     }
   }, [currentUser, activeTab])
 
+  // 修复：从后端 API 获取所有漫画，然后过滤出当前用户的漫画
   const fetchUserComics = async () => {
     try {
       setLoading(true)
-      // 模拟获取用户漫画数据
-      setTimeout(() => {
-        setUserComics([
-          { id: 1, title: "我的第一部漫画", image_url: "https://picsum.photos/300/200?random=10", created_at: new Date().toISOString() },
-          { id: 2, title: "奇幻冒险", image_url: "https://picsum.photos/300/200?random=11", created_at: new Date().toISOString() }
-        ])
-        setLoading(false)
-      }, 1000)
+      setError('')
+      
+      console.log('🔄 开始获取用户漫画...')
+      console.log('👤 当前用户ID:', currentUser.id)
+      
+      // 调用 API 获取所有漫画
+      const response = await api.get('/api/comics', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      })
+      
+      console.log('📚 获取到的所有漫画:', response.data)
+      
+      if (response.data && response.data.success) {
+        const allComics = response.data.data || []
+        
+        // 过滤出当前用户的漫画
+        const myComics = allComics.filter(comic => 
+          comic.user_id === currentUser.id || 
+          comic.author_id === currentUser.id ||
+          comic.author === currentUser.username
+        )
+        
+        console.log('🎯 过滤后的用户漫画:', myComics)
+        setUserComics(myComics)
+      } else {
+        setError('获取漫画数据失败')
+        setUserComics([])
+      }
     } catch (error) {
-      console.error('获取用户漫画失败:', error)
+      console.error('❌ 获取用户漫画失败:', error)
+      
+      if (error.response) {
+        console.error('📡 错误状态:', error.response.status)
+        console.error('📄 错误数据:', error.response.data)
+      }
+      
+      setError('获取漫画数据失败，请检查网络连接')
+      setUserComics([])
+      
+      // 如果是 401 未授权，可能是 token 过期，强制登出
+      if (error.response && error.response.status === 401) {
+        logout()
+        navigate('/login')
+      }
+    } finally {
       setLoading(false)
     }
+  }
+
+  // 处理漫画删除
+  const handleDeleteComic = async (comicId) => {
+    if (!window.confirm('确定要删除这个漫画吗？此操作不可恢复。')) {
+      return
+    }
+
+    try {
+      console.log('🗑️ 开始删除漫画:', comicId)
+      
+      const response = await api.delete(`/api/comics/${comicId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      })
+
+      console.log('✅ 删除响应:', response.data)
+
+      if (response.data && response.data.success) {
+        // 从列表中移除已删除的漫画
+        setUserComics(prev => prev.filter(comic => comic.id !== comicId))
+        alert('漫画删除成功')
+      } else {
+        alert('删除失败，请重试')
+      }
+    } catch (error) {
+      console.error('❌ 删除漫画失败:', error)
+      if (error.response) {
+        console.error('📡 删除错误状态:', error.response.status)
+        console.error('📄 删除错误数据:', error.response.data)
+      }
+      alert('删除失败，请检查网络连接')
+    }
+  }
+
+  // 处理漫画编辑
+  const handleEditComic = (comicId) => {
+    navigate(`/edit-comic/${comicId}`)
   }
 
   const handleLogout = () => {
@@ -233,56 +308,118 @@ const Profile = () => {
 
           {activeTab === 'comics' && (
             <div className="comics-tab">
-              <h2 style={{ marginBottom: '20px', color: 'var(--primary)' }}>我的漫画</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2 style={{ color: 'var(--primary)', margin: 0 }}>我的漫画 ({userComics.length})</h2>
+                <button 
+                  className="btn btn-primary"
+                  onClick={() => navigate('/upload')}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                  <i className="fas fa-plus"></i>
+                  上传新漫画
+                </button>
+              </div>
+              
+              {error && (
+                <div style={{ 
+                  background: '#ffe6e6', 
+                  color: '#d63031', 
+                  padding: '15px', 
+                  borderRadius: '8px', 
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <i className="fas fa-exclamation-triangle"></i>
+                  <span>{error}</span>
+                </div>
+              )}
+              
               {loading ? (
                 <div style={{ textAlign: 'center', padding: '40px' }}>
-                  <i className="fas fa-spinner fa-spin"></i>
+                  <i className="fas fa-spinner fa-spin" style={{ fontSize: '2rem', color: 'var(--primary)', marginBottom: '15px' }}></i>
                   <p>加载中...</p>
                 </div>
               ) : userComics.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-                  <i className="fas fa-book" style={{ fontSize: '3rem', marginBottom: '20px' }}></i>
+                  <i className="fas fa-book" style={{ fontSize: '3rem', marginBottom: '20px', color: '#bdc3c7' }}></i>
                   <h3>您还没有上传任何漫画作品</h3>
-                  <p>点击右上角的"上传漫画"开始创作吧！</p>
+                  <p>点击"上传新漫画"按钮开始创作吧！</p>
                   <button 
                     className="btn btn-primary"
                     onClick={() => navigate('/upload')}
                     style={{ marginTop: '20px' }}
                   >
-                    去上传
+                    <i className="fas fa-plus" style={{ marginRight: '8px' }}></i>
+                    上传漫画
                   </button>
                 </div>
               ) : (
                 <div className="comic-grid" style={{ 
                   display: 'grid', 
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                  gap: '20px'
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                  gap: '25px'
                 }}>
                   {userComics.map(comic => (
                     <div key={comic.id} className="comic-card" style={{
                       border: '1px solid #eee',
-                      borderRadius: '8px',
+                      borderRadius: '12px',
                       overflow: 'hidden',
-                      transition: 'transform 0.3s'
+                      transition: 'transform 0.3s, box-shadow 0.3s',
+                      background: 'white',
+                      boxShadow: '0 3px 10px rgba(0,0,0,0.1)'
                     }}>
                       <img 
-                        src={comic.image_url} 
+                        src={comic.image_url || comic.cover_url || '/default-comic-cover.jpg'} 
                         alt={comic.title} 
                         style={{
                           width: '100%',
-                          height: '150px',
+                          height: '180px',
                           objectFit: 'cover'
+                        }}
+                        onError={(e) => {
+                          e.target.src = '/default-comic-cover.jpg'
                         }}
                       />
                       <div className="comic-info" style={{ padding: '15px' }}>
                         <div className="comic-title" style={{ 
                           fontWeight: 'bold', 
-                          marginBottom: '5px' 
+                          marginBottom: '8px',
+                          fontSize: '1rem',
+                          lineHeight: '1.3',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          lineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden'
                         }}>
                           {comic.title}
                         </div>
-                        <div className="comic-date" style={{ fontSize: '0.8rem', color: '#999' }}>
+                        <div className="comic-date" style={{ fontSize: '0.8rem', color: '#999', marginBottom: '15px' }}>
                           {formatToBeijingTime(comic.created_at)}
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <button 
+                            className="btn btn-outline"
+                            onClick={() => handleEditComic(comic.id)}
+                            style={{ flex: 1, padding: '8px 12px', fontSize: '0.8rem' }}
+                          >
+                            <i className="fas fa-edit"></i>
+                          </button>
+                          <button 
+                            className="btn btn-outline"
+                            onClick={() => handleDeleteComic(comic.id)}
+                            style={{ 
+                              flex: 1, 
+                              padding: '8px 12px', 
+                              fontSize: '0.8rem',
+                              color: 'var(--danger)',
+                              borderColor: 'var(--danger)'
+                            }}
+                          >
+                            <i className="fas fa-trash"></i>
+                          </button>
                         </div>
                       </div>
                     </div>
