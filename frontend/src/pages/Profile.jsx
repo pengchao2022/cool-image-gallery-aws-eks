@@ -154,11 +154,44 @@ const Profile = () => {
 
   // 获取图片URL - 修复图片显示问题
   const getImageUrl = (comic) => {
-    // 调试：查看漫画对象的所有字段
     console.log(`🔍 漫画 "${comic.title}" 的所有字段:`, Object.keys(comic));
     console.log(`🔍 漫画 "${comic.title}" 的完整数据:`, comic);
     
-    // 检查所有可能的图片URL字段
+    // 检查 image_urls 字段（复数形式）
+    if (comic.image_urls) {
+      console.log(`✅ 找到 image_urls 字段:`, comic.image_urls);
+      
+      // 如果 image_urls 是数组，取第一个图片
+      if (Array.isArray(comic.image_urls) && comic.image_urls.length > 0) {
+        const firstImageUrl = comic.image_urls[0];
+        console.log(`🖼️ 使用数组中的第一个图片:`, firstImageUrl);
+        
+        // 如果URL是相对路径，添加基础URL
+        if (firstImageUrl && firstImageUrl.startsWith('/')) {
+          const fullUrl = `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${firstImageUrl}`;
+          console.log(`🖼️ 完整图片URL:`, fullUrl);
+          return fullUrl;
+        }
+        
+        return firstImageUrl;
+      } 
+      // 如果 image_urls 是字符串，直接使用
+      else if (typeof comic.image_urls === 'string') {
+        const imageUrl = comic.image_urls;
+        console.log(`🖼️ image_urls 是字符串:`, imageUrl);
+        
+        // 如果URL是相对路径，添加基础URL
+        if (imageUrl.startsWith('/')) {
+          const fullUrl = `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
+          console.log(`🖼️ 完整图片URL:`, fullUrl);
+          return fullUrl;
+        }
+        
+        return imageUrl;
+      }
+    }
+    
+    // 检查其他可能的图片URL字段
     const possibleImageFields = [
       'image_url', 'cover_url', 'coverImage', 'image', 
       'cover', 'thumbnail', 'picture', 'photo',
@@ -185,7 +218,7 @@ const Profile = () => {
     
     console.warn(`⚠️ 漫画 "${comic.title}" 没有找到图片URL字段`);
     
-    // 如果没有图片，使用默认的占位图（使用更可靠的占位图服务）
+    // 如果没有图片，使用默认的占位图
     return 'https://placehold.co/300x200/6c5ce7/white?text=No+Image&font=roboto';
   }
 
@@ -370,7 +403,7 @@ const Profile = () => {
         {/* 主要内容区域 */}
         <div className="profile-main" style={{
           background: 'white',
-          borderRadius: '10px',
+          borderRadius: '10point',
           padding: '30px',
           boxShadow: '0 5px 15px rgba(0,0,0,0.1)'
         }}>
