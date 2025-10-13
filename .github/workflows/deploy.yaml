@@ -347,13 +347,18 @@ jobs:
           
           echo "使用的后端镜像: $BACKEND_IMAGE"
           
-          # 使用 envsubst 替换迁移文件中的镜像占位符
-          export BACKEND_IMAGE="$BACKEND_IMAGE"
-          envsubst '${BACKEND_IMAGE}' < k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
+          # 直接使用 sed 替换 PLACEHOLDER_BACKEND_IMAGE（匹配迁移文件中的占位符）
+          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
           
           # 验证替换是否成功
           echo "=== 验证镜像替换 ==="
-          grep -n "image:" /tmp/db-migration-job.yaml
+          grep "image:" /tmp/db-migration-job.yaml
+          
+          # 检查是否还有占位符
+          if grep -q "PLACEHOLDER_BACKEND_IMAGE" /tmp/db-migration-job.yaml; then
+            echo "❌ 错误: 镜像占位符没有被替换"
+            exit 1
+          fi
           
           # 应用 migration job
           kubectl apply -f /tmp/db-migration-job.yaml
@@ -369,12 +374,22 @@ jobs:
             # 清理 migration job
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
-            MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
-            echo "❌ Migration failed"
-            echo "=== Migration Logs ==="
-            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            echo "=== Job Description ==="
+            echo "❌ Migration failed or timed out"
+            echo "=== 检查迁移 Pod 状态 ==="
+            kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
+            echo "=== 检查 Job 状态 ==="
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
+            
+            # 尝试获取 Pod 日志
+            MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$MIGRATION_POD" ]; then
+              echo "=== Migration Pod Logs ==="
+              kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
+            else
+              echo "没有找到迁移 Pod，可能是镜像拉取失败"
+              echo "=== 检查 Events ==="
+              kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -10
+            fi
             exit 1
           fi
 
