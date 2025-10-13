@@ -43,14 +43,14 @@ export const uploadComic = async (req, res) => {
 
     let imageUrls;
     
-    // 检查 S3 配置是否完整
-    const hasS3Config = config.AWS_ACCESS_KEY_ID && config.AWS_SECRET_ACCESS_KEY && config.S3_BUCKET_NAME;
+    // 修改：使用 IAM Role 时只需要 Bucket Name，不需要 Access Key
+    const hasS3Config = config.S3_BUCKET_NAME && config.S3_BUCKET_NAME !== '';
     
     console.log('🔧 S3 配置检查:', {
-      AWS_ACCESS_KEY_ID: config.AWS_ACCESS_KEY_ID ? '已设置' : '未设置',
-      AWS_SECRET_ACCESS_KEY: config.AWS_SECRET_ACCESS_KEY ? '已设置' : '未设置',
+      AWS_ACCESS_KEY_ID: config.AWS_ACCESS_KEY_ID ? '已设置' : '未设置 (使用 IAM Role)',
+      AWS_SECRET_ACCESS_KEY: config.AWS_SECRET_ACCESS_KEY ? '已设置' : '未设置 (使用 IAM Role)',
       S3_BUCKET_NAME: config.S3_BUCKET_NAME || '未设置',
-      完整配置: hasS3Config ? '✅ 完整' : '❌ 不完整'
+      '完整配置': hasS3Config ? '✅ 完整 (使用 IAM Role)' : '❌ 不完整'
     });
     
     if (hasS3Config) {
