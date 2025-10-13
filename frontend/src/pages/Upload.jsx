@@ -34,7 +34,6 @@ const Upload = () => {
         setFormData(prev => ({ ...prev, files: validFiles }))
       }
     }
-    e.target.value = ''
   }
 
   const handleUploadAreaClick = () => {
