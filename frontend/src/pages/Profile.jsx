@@ -56,28 +56,35 @@ const Profile = () => {
       console.log('🔄 开始获取用户漫画...')
       console.log('👤 当前用户ID:', currentUser.id)
       
-      // 修复：移除重复的 /api 前缀，因为 api.jsx 中已经包含了基础路径
-      const response = await api.get('/comics', {  // 改为 /comics 而不是 /api/comics
+      // 调用 API 获取所有漫画
+      const response = await api.get('/comics', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       })
       
-      console.log('📚 获取到的所有漫画:', response.data)
+      console.log('📚 获取到的所有漫画响应:', response.data)
       
       if (response.data && response.data.success) {
-        const allComics = response.data.data || []
+        // 修复：使用正确的数据结构 response.data.comics 而不是 response.data.data
+        const allComics = response.data.comics || []
+        
+        console.log('📖 所有漫画列表:', allComics)
         
         // 过滤出当前用户的漫画
-        const myComics = allComics.filter(comic => 
-          comic.user_id === currentUser.id || 
-          comic.author_id === currentUser.id ||
-          comic.author === currentUser.username
-        )
+        const myComics = allComics.filter(comic => {
+          console.log(`🔍 检查漫画: ${comic.title}, 用户ID: ${comic.user_id}, 当前用户ID: ${currentUser.id}`)
+          return (
+            comic.user_id === currentUser.id || 
+            comic.author_id === currentUser.id ||
+            comic.author === currentUser.username
+          )
+        })
         
         console.log('🎯 过滤后的用户漫画:', myComics)
         setUserComics(myComics)
       } else {
+        console.error('❌ API 返回失败:', response.data)
         setError('获取漫画数据失败')
         setUserComics([])
       }
@@ -112,8 +119,7 @@ const Profile = () => {
     try {
       console.log('🗑️ 开始删除漫画:', comicId)
       
-      // 修复：移除重复的 /api 前缀
-      const response = await api.delete(`/comics/${comicId}`, {  // 改为 /comics 而不是 /api/comics
+      const response = await api.delete(`/comics/${comicId}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
