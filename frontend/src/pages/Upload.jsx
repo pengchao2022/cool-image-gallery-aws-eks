@@ -5,7 +5,7 @@ import api from '../services/api.jsx'
 import '../App.css'
 
 const Upload = () => {
-  const { currentUser } = useContext(AuthContext)
+  const { currentUser, refreshUser } = useContext(AuthContext) // 添加 refreshUser
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -96,14 +96,25 @@ const Upload = () => {
     } catch (error) {
       console.error('❌ 上传失败:', error)
       
-      // 处理特定错误类型
+      // 改进的错误处理 - 不自动清除认证信息
       let errorMessage = error.message
       if (error.message.includes('token') || error.message.includes('401') || error.message.includes('Unauthorized')) {
         errorMessage = '认证失败：Token无效或已过期'
-        alert(`${errorMessage}，请重新登录`)
-        localStorage.removeItem('authToken')
-        localStorage.removeItem('token')
-        navigate('/login')
+        
+        console.log('🔄 检测到认证错误，跳转到错误页面而不是直接清除数据')
+        
+        // 跳转到认证错误页面，让用户决定下一步操作
+        navigate('/auth-error', {
+          state: {
+            error: '上传时认证失败，但您的登录信息仍然存在',
+            from: 'comic-upload-401',
+            hasUserData: !!currentUser,
+            canRetry: true,
+            contextUser: currentUser ? `ID: ${currentUser.id}` : 'null',
+            storageUser: localStorage.getItem('user') ? '存在' : 'null',
+            token: localStorage.getItem('authToken') ? '存在' : '不存在'
+          }
+        })
         return
       } else if (error.message.includes('Failed to fetch') || error.message.includes('Network')) {
         errorMessage = '网络连接失败，请检查后端服务是否正常运行'
