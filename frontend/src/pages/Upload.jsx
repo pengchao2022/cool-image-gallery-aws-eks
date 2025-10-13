@@ -5,7 +5,7 @@ import api from '../services/api.jsx'
 import '../App.css'
 
 const Upload = () => {
-  const { currentUser, refreshUser } = useContext(AuthContext) // 添加 refreshUser
+  const { currentUser, refreshUser } = useContext(AuthContext)
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -17,6 +17,8 @@ const Upload = () => {
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files)
+    console.log('📄 选择的文件:', files.length)
+    
     if (files.length > 0) {
       const validFiles = files.filter(file => {
         if (!file.type.startsWith('image/')) {
@@ -30,6 +32,8 @@ const Upload = () => {
         return true
       })
       
+      console.log('✅ 有效文件:', validFiles.length)
+      
       if (validFiles.length > 0) {
         setFormData(prev => ({ ...prev, files: validFiles }))
       }
@@ -37,7 +41,9 @@ const Upload = () => {
   }
 
   const handleUploadAreaClick = () => {
+    console.log('🖱️ 上传区域被点击')
     if (!uploading) {
+      console.log('🔍 触发文件输入点击')
       fileInputRef.current?.click()
     }
   }
@@ -55,17 +61,8 @@ const Upload = () => {
       console.log('🚀 开始上传漫画...')
       console.log('👤 当前用户:', currentUser)
       
-      // 检查token
       const token = localStorage.getItem('authToken') || localStorage.getItem('token')
       console.log('🔑 Token状态:', token ? '存在' : '不存在')
-      
-      const submitData = new FormData()
-      submitData.append('title', formData.title)
-      submitData.append('description', formData.description)
-      
-      formData.files.forEach((file) => {
-        submitData.append('images', file)
-      })
 
       console.log('📤 表单数据:', {
         title: formData.title,
@@ -76,7 +73,6 @@ const Upload = () => {
 
       console.log('📤 调用上传API...')
       
-      // 使用多文件上传方法
       const response = await api.comics.createMultiple({
         title: formData.title,
         description: formData.description
@@ -95,14 +91,12 @@ const Upload = () => {
     } catch (error) {
       console.error('❌ 上传失败:', error)
       
-      // 改进的错误处理 - 不自动清除认证信息
       let errorMessage = error.message
       if (error.message.includes('token') || error.message.includes('401') || error.message.includes('Unauthorized')) {
         errorMessage = '认证失败：Token无效或已过期'
         
         console.log('🔄 检测到认证错误，跳转到错误页面而不是直接清除数据')
         
-        // 跳转到认证错误页面，让用户决定下一步操作
         navigate('/auth-error', {
           state: {
             error: '上传时认证失败，但您的登录信息仍然存在',
@@ -132,7 +126,11 @@ const Upload = () => {
     setFormData(prev => ({ ...prev, files: newFiles }))
   }
 
-  const uploadAreaClass = `upload-area ${formData.files.length > 0 ? 'has-files' : ''}`
+  const clearAllFiles = () => {
+    if (!uploading) {
+      setFormData(prev => ({ ...prev, files: [] }))
+    }
+  }
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -179,42 +177,53 @@ const Upload = () => {
 
           <div className="form-group">
             <label>上传图片 * (支持多选)</label>
-            <div 
-              className={uploadAreaClass}
-              onClick={handleUploadAreaClick}
-            >
-              {formData.files.length > 0 ? (
-                <>
-                  <i className="fas fa-file-image"></i>
-                  <p className="upload-text">已选择 {formData.files.length} 个文件</p>
-                  <p className="upload-hint">点击添加更多文件</p>
-                  <div className="file-list">
-                    {formData.files.map((file, index) => (
-                      <div key={index} className="file-item">
-                        <span className="file-name">{file.name}</span>
-                        <button
-                          type="button"
-                          className="file-remove"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            removeFile(index)
-                          }}
-                          disabled={uploading}
-                        >
-                          <i className="fas fa-times"></i>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-cloud-upload-alt"></i>
-                  <p className="upload-text">点击选择文件</p>
-                  <p className="upload-hint">支持 JPG, PNG 格式，最大 10MB</p>
-                </>
-              )}
-              
+            
+            {/* 重新设计的上传区域 */}
+            <div style={{ position: 'relative' }}>
+              {/* 可见的上传区域 */}
+              <div 
+                className={`upload-area ${formData.files.length > 0 ? 'has-files' : ''}`}
+                onClick={handleUploadAreaClick}
+                style={{
+                  cursor: uploading ? 'not-allowed' : 'pointer',
+                  position: 'relative',
+                  zIndex: 1
+                }}
+              >
+                {formData.files.length > 0 ? (
+                  <>
+                    <i className="fas fa-file-image"></i>
+                    <p className="upload-text">已选择 {formData.files.length} 个文件</p>
+                    <p className="upload-hint">点击添加更多文件</p>
+                    <div className="file-list">
+                      {formData.files.map((file, index) => (
+                        <div key={index} className="file-item">
+                          <span className="file-name">{file.name}</span>
+                          <button
+                            type="button"
+                            className="file-remove"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              removeFile(index)
+                            }}
+                            disabled={uploading}
+                          >
+                            <i className="fas fa-times"></i>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-cloud-upload-alt"></i>
+                    <p className="upload-text">点击选择文件</p>
+                    <p className="upload-hint">支持 JPG, PNG 格式，最大 10MB</p>
+                  </>
+                )}
+              </div>
+
+              {/* 透明的文件输入，覆盖整个上传区域 */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -223,8 +232,42 @@ const Upload = () => {
                 multiple
                 onChange={handleFileSelect}
                 disabled={uploading}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  opacity: 0,
+                  cursor: uploading ? 'not-allowed' : 'pointer',
+                  zIndex: 2
+                }}
               />
             </div>
+
+            {/* 文件操作按钮 */}
+            {formData.files.length > 0 && (
+              <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={clearAllFiles}
+                  disabled={uploading}
+                  style={{ fontSize: '12px', padding: '5px 10px' }}
+                >
+                  清除所有文件
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={handleUploadAreaClick}
+                  disabled={uploading}
+                  style={{ fontSize: '12px', padding: '5px 10px' }}
+                >
+                  添加更多文件
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', marginTop: '30px' }}>
@@ -266,6 +309,7 @@ const Upload = () => {
           <div>用户: {currentUser?.username || '未登录'}</div>
           <div>用户ID: {currentUser?.id || '未知'}</div>
           <div>Token: {localStorage.getItem('authToken') ? '存在' : '不存在'}</div>
+          <div>文件数量: {formData.files.length}</div>
           <div>上传状态: {uploading ? '进行中' : '空闲'}</div>
         </div>
       </div>
