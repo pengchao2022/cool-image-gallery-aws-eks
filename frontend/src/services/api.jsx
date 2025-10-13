@@ -41,14 +41,30 @@ async function request(endpoint, options = {}) {
     if (!response.ok) {
       // 尝试解析错误信息
       let errorMessage = `请求失败: ${response.status}`
+      let errorData = null
+      
       try {
-        const errorData = await response.json()
+        errorData = await response.json()
         errorMessage = errorData.message || errorData.error || errorMessage
+        console.log('❌ 错误详情:', errorData)
       } catch {
         // 如果响应不是JSON，使用状态文本
         errorMessage = response.statusText || errorMessage
       }
-      throw new Error(errorMessage)
+
+      // 创建错误对象
+      const error = new Error(errorMessage)
+      error.status = response.status
+      error.data = errorData
+      
+      // 401 错误特殊处理 - 不清除本地数据
+      if (response.status === 401) {
+        console.log('🔐 认证失败 (401)，但不自动清除数据')
+        // 只是记录，不清除 localStorage
+        // 让调用方决定如何处理
+      }
+      
+      throw error
     }
 
     // 处理空响应
@@ -93,14 +109,29 @@ async function uploadRequest(endpoint, formData) {
     
     if (!response.ok) {
       let errorMessage = `上传失败: ${response.status}`
+      let errorData = null
+      
       try {
-        const errorData = await response.json()
+        errorData = await response.json()
         errorMessage = errorData.message || errorData.error || errorMessage
         console.log('❌ 上传错误详情:', errorData)
       } catch {
         errorMessage = response.statusText || errorMessage
       }
-      throw new Error(errorMessage)
+
+      // 创建错误对象
+      const error = new Error(errorMessage)
+      error.status = response.status
+      error.data = errorData
+      error.response = response
+      
+      // 401 错误特殊处理 - 不清除本地数据
+      if (response.status === 401) {
+        console.log('🔐 上传认证失败 (401)，但不自动清除数据')
+        // 只是记录，不清除 localStorage
+      }
+      
+      throw error
     }
 
     const contentType = response.headers.get('content-type')
@@ -119,119 +150,137 @@ async function uploadRequest(endpoint, formData) {
   }
 }
 
-// 其余代码保持不变...
-export const api = {
-  // 认证相关
-  auth: {
-    login: (email, password) => 
-      request('/auth/login', {
-        method: 'POST',
-        body: { email, password },
-      }),
-    
-    register: (username, email, password) => 
-      request('/auth/register', {
-        method: 'POST',
-        body: { username, email, password },
-      }),
-    
-    getProfile: () => request('/auth/me'),
-    
-    logout: () => request('/auth/logout'),
-  },
-
-  // 漫画相关
-  comics: {
-    getAll: () => request('/comics'),
-    
-    getById: (id) => request(`/comics/${id}`),
-    
-    // 创建漫画（多文件版本）
-    createMultiple: (comicData, files) => {
-      const formData = new FormData()
-      formData.append('title', comicData.title)
-      formData.append('description', comicData.description || '')
-      files.forEach((file) => {
-        formData.append('images', file)
-      })
-      return uploadRequest('/comics', formData)
+// 创建 API 客户端实例
+const createApiClient = () => {
+  let authToken = localStorage.getItem('authToken') || localStorage.getItem('token')
+  
+  return {
+    // 设置认证token
+    setAuthToken: (token) => {
+      authToken = token
+      localStorage.setItem('authToken', token)
     },
     
-    update: (id, comicData) => 
-      request(`/comics/${id}`, {
-        method: 'PUT',
-        body: comicData,
-      }),
+    // 清除认证
+    clearAuth: () => {
+      authToken = null
+      localStorage.removeItem('authToken')
+      localStorage.removeItem('token')
+    },
     
-    delete: (id) => 
-      request(`/comics/${id}`, {
-        method: 'DELETE',
-      }),
+    // 获取当前token
+    getAuthToken: () => authToken,
     
-    getMyComics: () => request('/comics/my-comics'),
-    
-    search: (query) => request(`/comics/search?q=${encodeURIComponent(query)}`),
-  },
+    // 认证相关
+    auth: {
+      login: (email, password) => 
+        request('/auth/login', {
+          method: 'POST',
+          body: { email, password },
+        }),
+      
+      register: (username, email, password) => 
+        request('/auth/register', {
+          method: 'POST',
+          body: { username, email, password },
+        }),
+      
+      getProfile: () => request('/auth/me'),
+      
+      logout: () => request('/auth/logout'),
+    },
 
-  // 用户相关
-  users: {
-    getProfile: (userId) => request(`/users/${userId}`),
-    
-    updateProfile: (userId, userData) => 
-      request(`/users/${userId}`, {
-        method: 'PUT',
-        body: userData,
-      }),
-    
-    getCurrentUser: () => request('/users/profile'),
-    
-    getRegistrationDate: (userId) => request(`/users/registration-date/${userId}`),
-  },
+    // 漫画相关
+    comics: {
+      getAll: () => request('/comics'),
+      
+      getById: (id) => request(`/comics/${id}`),
+      
+      // 创建漫画（多文件版本）
+      createMultiple: (formData) => {
+        return uploadRequest('/comics', formData)
+      },
+      
+      update: (id, comicData) => 
+        request(`/comics/${id}`, {
+          method: 'PUT',
+          body: comicData,
+        }),
+      
+      delete: (id) => 
+        request(`/comics/${id}`, {
+          method: 'DELETE',
+        }),
+      
+      getMyComics: () => request('/comics/my-comics'),
+      
+      search: (query) => request(`/comics/search?q=${encodeURIComponent(query)}`),
+    },
 
-  // 健康检查
-  health: {
-    check: () => request('/health'),
-  },
+    // 用户相关
+    users: {
+      getProfile: (userId) => request(`/users/${userId}`),
+      
+      updateProfile: (userId, userData) => 
+        request(`/users/${userId}`, {
+          method: 'PUT',
+          body: userData,
+        }),
+      
+      getCurrentUser: () => request('/users/profile'),
+      
+      getRegistrationDate: (userId) => request(`/users/registration-date/${userId}`),
+    },
 
-  // 直接请求方法
-  post: (endpoint, data, options = {}) => {
-    if (data instanceof FormData) {
-      return uploadRequest(endpoint, data)
-    } else {
+    // 健康检查
+    health: {
+      check: () => request('/health'),
+    },
+
+    // 直接请求方法
+    post: (endpoint, data, options = {}) => {
+      if (data instanceof FormData) {
+        return uploadRequest(endpoint, data)
+      } else {
+        return request(endpoint, {
+          method: 'POST',
+          body: data,
+          ...options
+        })
+      }
+    },
+
+    get: (endpoint, options = {}) => {
       return request(endpoint, {
-        method: 'POST',
+        method: 'GET',
+        ...options
+      })
+    },
+
+    put: (endpoint, data, options = {}) => {
+      return request(endpoint, {
+        method: 'PUT',
         body: data,
         ...options
       })
-    }
-  },
+    },
 
-  get: (endpoint, options = {}) => {
-    return request(endpoint, {
-      method: 'GET',
-      ...options
-    })
-  },
+    delete: (endpoint, options = {}) => {
+      return request(endpoint, {
+        method: 'DELETE',
+        ...options
+      })
+    },
 
-  put: (endpoint, data, options = {}) => {
-    return request(endpoint, {
-      method: 'PUT',
-      body: data,
-      ...options
-    })
-  },
-
-  delete: (endpoint, options = {}) => {
-    return request(endpoint, {
-      method: 'DELETE',
-      ...options
-    })
-  },
-
-  uploadRequest: uploadRequest
+    uploadRequest: uploadRequest
+  }
 }
+
+// 创建并导出 API 实例
+const api = createApiClient()
 
 console.log('API Base URL:', API_BASE_URL)
 console.log('Environment:', import.meta.env.MODE)
 
 export default api
+export { api }

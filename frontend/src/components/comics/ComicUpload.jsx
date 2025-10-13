@@ -1,9 +1,11 @@
 import React, { useState, useContext } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { AuthContext } from '../../context/AuthContext.jsx'
 import api from '../../services/api.jsx'
 
 const ComicUpload = ({ onComicUpload }) => {
   const { currentUser, refreshUser } = useContext(AuthContext)
+  const navigate = useNavigate()
   const [uploading, setUploading] = useState(false)
   const [uploadData, setUploadData] = useState({
     title: '',
@@ -56,11 +58,11 @@ const ComicUpload = ({ onComicUpload }) => {
       // 使用真实的 API 调用
       const response = await api.comics.createMultiple(formData)
       
-      console.log('✅ 上传成功:', response.data)
+      console.log('✅ 上传成功:', response)
       
       // 调用成功回调
       if (onComicUpload) {
-        onComicUpload(response.data)
+        onComicUpload(response)
       }
       
       // 重置表单
@@ -77,24 +79,31 @@ const ComicUpload = ({ onComicUpload }) => {
     } catch (error) {
       console.error('❌ 上传失败:', error)
       
-      // 改进的错误处理
-      if (error.response?.status === 401) {
-        console.log('🔐 上传认证失败')
+      // 改进的错误处理 - 使用新的错误对象结构
+      if (error.status === 401) {
+        console.log('🔐 上传认证失败 (401)')
         
-        // 不清除本地数据，而是刷新用户状态
-        try {
-          await refreshUser()
-          alert('认证已过期，已尝试刷新状态，请重试上传')
-        } catch (refreshError) {
-          console.error('刷新用户状态失败:', refreshError)
-          alert('认证已过期，请重新登录')
-        }
-      } else if (error.response?.status === 413) {
+        // 导航到上传错误页面
+        navigate('/upload-error', {
+          state: {
+            error: '认证失败，请重新登录',
+            status: 401,
+            from: 'upload'
+          }
+        })
+      } else if (error.status === 413) {
         alert('文件太大，请选择小于 10MB 的文件')
-      } else if (error.response?.data?.message) {
-        alert(`上传失败: ${error.response.data.message}`)
+      } else if (error.data?.message) {
+        alert(`上传失败: ${error.data.message}`)
       } else {
-        alert('上传失败，请重试')
+        // 其他错误导航到错误页面
+        navigate('/upload-error', {
+          state: {
+            error: error.message || '上传失败，请重试',
+            status: error.status || 500,
+            from: 'upload'
+          }
+        })
       }
     } finally {
       setUploading(false)
