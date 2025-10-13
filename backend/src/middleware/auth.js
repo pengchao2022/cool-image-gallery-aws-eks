@@ -39,7 +39,9 @@ export const authenticate = async (req, res, next) => {
     console.log('✅ decoded payload:', decoded);
     console.log('✅ userId:', decoded.userId);
     
-    const user = await User.findById(decoded.userId);
+    // 修改：使用 Sequelize 的正确方法 findByPk 而不是 findById
+    console.log('🔍 使用 User.findByPk 查询用户...');
+    const user = await User.findByPk(decoded.userId);
     
     if (!user) {
       console.log('❌ 用户不存在, userId:', decoded.userId);
@@ -87,7 +89,8 @@ export const optionalAuth = async (req, res, next) => {
     if (token) {
       console.log('🔐 [optionalAuth] 找到 token，尝试验证');
       const decoded = jwt.verify(token, config.JWT_SECRET);
-      const user = await User.findById(decoded.userId);
+      // 修改：使用 Sequelize 的正确方法 findByPk 而不是 findById
+      const user = await User.findByPk(decoded.userId);
       req.user = user;
       console.log('🔐 [optionalAuth] 用户设置完成');
     } else {
