@@ -1,10 +1,9 @@
 import AWS from 'aws-sdk';
 import { config } from './constants.js';
 
+// 生产环境使用 IAM Role，不需要设置 Access Key
 AWS.config.update({
-  region: config.AWS_REGION,
-  accessKeyId: config.AWS_ACCESS_KEY_ID,
-  secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
+  region: config.AWS_REGION || 'us-east-1'
 });
 
 export const s3 = new AWS.S3();

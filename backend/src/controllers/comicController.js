@@ -1,4 +1,4 @@
-import { Comic } from '../models/Comic.js';
+import Comic from '../models/Comic.js';  // 修改：改为默认导入
 import { S3Service } from '../utils/s3.js';
 import { config } from '../config/constants.js';
 
@@ -86,7 +86,7 @@ export const uploadComic = async (req, res) => {
       image_urls: imageUrls
     });
 
-    // Create comic record
+    // Create comic record - 使用 Sequelize 的 create 方法
     const comic = await Comic.create({
       title,
       description: description || '',
@@ -137,18 +137,29 @@ export const getAllComics = async (req, res) => {
 
     console.log('📚 分页参数:', { page, limit });
 
-    const result = await Comic.findAll(page, limit);
+    // 使用 Sequelize 的 findAll 方法
+    const comics = await Comic.findAll({
+      limit: limit,
+      offset: (page - 1) * limit,
+      order: [['created_at', 'DESC']]
+    });
+
+    // 获取总数
+    const total = await Comic.count();
 
     console.log('✅ 获取漫画成功:', {
-      总数: result.total,
-      当前页: result.page,
-      总页数: result.pages,
-      漫画数量: result.comics?.length || 0
+      总数: total,
+      当前页: page,
+      总页数: Math.ceil(total / limit),
+      漫画数量: comics?.length || 0
     });
 
     res.json({
       success: true,
-      ...result
+      comics,
+      total,
+      page,
+      pages: Math.ceil(total / limit)
     });
   } catch (error) {
     console.error('❌ Get comics error:', error);
@@ -166,7 +177,8 @@ export const getComic = async (req, res) => {
     console.log('📖 请求的漫画ID:', id);
     console.log('📖 用户信息:', req.user ? `用户ID: ${req.user.id}` : '匿名用户');
 
-    const comic = await Comic.findById(id);
+    // 使用 Sequelize 的 findByPk 方法
+    const comic = await Comic.findByPk(id);
 
     if (!comic) {
       console.log('❌ 漫画未找到，ID:', id);
@@ -209,19 +221,30 @@ export const getUserComics = async (req, res) => {
 
     console.log('👤 分页参数:', { page, limit });
 
-    const result = await Comic.findByUserId(req.user.id, page, limit);
+    // 使用 Sequelize 的查询方法
+    const comics = await Comic.findAll({
+      where: { user_id: req.user.id },
+      limit: limit,
+      offset: (page - 1) * limit,
+      order: [['created_at', 'DESC']]
+    });
+
+    const total = await Comic.count({ where: { user_id: req.user.id } });
 
     console.log('✅ 获取用户漫画成功:', {
       用户ID: req.user.id,
-      总数: result.total,
-      当前页: result.page,
-      总页数: result.pages,
-      漫画数量: result.comics?.length || 0
+      总数: total,
+      当前页: page,
+      总页数: Math.ceil(total / limit),
+      漫画数量: comics?.length || 0
     });
 
     res.json({
       success: true,
-      ...result
+      comics,
+      total,
+      page,
+      pages: Math.ceil(total / limit)
     });
   } catch (error) {
     console.error('❌ Get user comics error:', error);
@@ -242,15 +265,27 @@ export const deleteComic = async (req, res) => {
       username: req.user.username
     });
 
-    const comic = await Comic.delete(id, req.user.id);
-
+    // 使用 Sequelize 的 destroy 方法
+    const comic = await Comic.findByPk(id);
+    
     if (!comic) {
-      console.log('❌ 漫画未找到或无权删除，漫画ID:', id, '用户ID:', req.user.id);
+      console.log('❌ 漫画未找到，漫画ID:', id);
       return res.status(404).json({
         success: false,
-        message: 'Comic not found or access denied'
+        message: 'Comic not found'
       });
     }
+
+    // 检查权限
+    if (comic.user_id !== req.user.id) {
+      console.log('❌ 无权删除，漫画用户ID:', comic.user_id, '当前用户ID:', req.user.id);
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    await comic.destroy();
 
     console.log('✅ 漫画删除成功:', {
       漫画ID: id,
@@ -292,19 +327,45 @@ export const searchComics = async (req, res) => {
 
     console.log('🔍 搜索参数:', { q, page, limit });
 
-    const result = await Comic.search(q, page, limit);
+    // 使用 Sequelize 的搜索方法
+    const { Op } = require('sequelize');
+    const comics = await Comic.findAll({
+      where: {
+        [Op.or]: [
+          { title: { [Op.iLike]: `%${q}%` } },
+          { description: { [Op.iLike]: `%${q}%` } },
+          { tags: { [Op.iLike]: `%${q}%` } }
+        ]
+      },
+      limit: limit,
+      offset: (page - 1) * limit,
+      order: [['created_at', 'DESC']]
+    });
+
+    const total = await Comic.count({
+      where: {
+        [Op.or]: [
+          { title: { [Op.iLike]: `%${q}%` } },
+          { description: { [Op.iLike]: `%${q}%` } },
+          { tags: { [Op.iLike]: `%${q}%` } }
+        ]
+      }
+    });
 
     console.log('✅ 搜索成功:', {
       关键词: q,
-      总数: result.total,
-      当前页: result.page,
-      总页数: result.pages,
-      结果数量: result.comics?.length || 0
+      总数: total,
+      当前页: page,
+      总页数: Math.ceil(total / limit),
+      结果数量: comics?.length || 0
     });
 
     res.json({
       success: true,
-      ...result
+      comics,
+      total,
+      page,
+      pages: Math.ceil(total / limit)
     });
   } catch (error) {
     console.error('❌ Search comics error:', error);

@@ -1,20 +1,42 @@
-// Comic model for PostgreSQL
-export class Comic {
-    constructor(id, title, description, imageUrl, s3Key, uploaderId) {
-        this.id = id;
-        this.title = title;
-        this.description = description;
-        this.imageUrl = imageUrl;
-        this.s3Key = s3Key;
-        this.uploaderId = uploaderId;
-        this.views = 0;
-        this.createdAt = new Date();
-        this.updatedAt = new Date();
-    }
-}
+// src/models/Comic.js
+import { DataTypes } from 'sequelize';
+import { sequelize } from '../config/database.js';
 
-// Mock comic data for development
-export const mockComics = [
-    new Comic(1, 'Sample Comic 1', 'Description 1', 'https://example.com/image1.jpg', 's3-key-1', 1),
-    new Comic(2, 'Sample Comic 2', 'Description 2', 'https://example.com/image2.jpg', 's3-key-2', 2)
-];
+const Comic = sequelize.define('Comic', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  title: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  tags: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  user_id: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  image_urls: {
+    type: DataTypes.JSONB, // 或者 DataTypes.ARRAY(DataTypes.STRING)
+    allowNull: false
+  },
+  views: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  }
+}, {
+  tableName: 'comics',
+  timestamps: true,
+  createdAt: 'created_at',
+  updatedAt: 'updated_at'
+});
+
+export default Comic;
