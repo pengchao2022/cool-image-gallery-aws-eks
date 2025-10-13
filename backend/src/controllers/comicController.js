@@ -50,19 +50,44 @@ export const uploadComic = async (req, res) => {
       AWS_ACCESS_KEY_ID: config.AWS_ACCESS_KEY_ID ? '已设置' : '未设置 (使用 IAM Role)',
       AWS_SECRET_ACCESS_KEY: config.AWS_SECRET_ACCESS_KEY ? '已设置' : '未设置 (使用 IAM Role)',
       S3_BUCKET_NAME: config.S3_BUCKET_NAME || '未设置',
+      AWS_REGION: config.AWS_REGION || '未设置',
       '完整配置': hasS3Config ? '✅ 完整 (使用 IAM Role)' : '❌ 不完整'
     });
     
     if (hasS3Config) {
       try {
-        console.log('🔧 尝试 S3 上传...');
+        console.log('🔧 开始 S3 上传...');
+        console.log('🔧 S3 配置详情:', {
+          bucket: config.S3_BUCKET_NAME,
+          region: config.AWS_REGION || 'us-east-1',
+          hasAccessKey: !!config.AWS_ACCESS_KEY_ID,
+          hasSecretKey: !!config.AWS_SECRET_ACCESS_KEY,
+          filesCount: files.length
+        });
+        
         const uploadedImages = await S3Service.uploadMultipleImages(files);
         imageUrls = uploadedImages.map(img => img.url);
         console.log('✅ S3 上传成功，生成URL:', imageUrls);
+        
+        // 验证URL是否有效
+        imageUrls.forEach((url, index) => {
+          if (url.includes('picsum.photos')) {
+            console.log('⚠️ 警告: 生成的URL仍然是占位图片:', url);
+          } else if (url.includes('s3.amazonaws.com')) {
+            console.log('✅ 确认: 生成的是真实S3 URL:', url);
+          }
+        });
       } catch (s3Error) {
-        console.log('❌ S3 上传失败:', s3Error.message);
-        console.log('❌ S3 错误堆栈:', s3Error.stack);
+        console.log('❌ S3 上传失败:');
+        console.log('❌ 错误信息:', s3Error.message);
+        console.log('❌ 错误代码:', s3Error.code);
+        console.log('❌ 状态码:', s3Error.statusCode);
+        console.log('❌ 请求ID:', s3Error.requestId);
+        console.log('❌ 区域:', s3Error.region);
+        console.log('❌ 错误堆栈:', s3Error.stack);
+        
         // 降级到备用方案
+        console.log('🔄 降级到备用方案...');
         imageUrls = files.map((file, index) => {
           return `https://picsum.photos/800/1200?random=${Date.now()}-${index}`;
         });
@@ -70,6 +95,9 @@ export const uploadComic = async (req, res) => {
       }
     } else {
       console.log('⚠️ S3 配置不完整，使用备用方案');
+      console.log('⚠️ 缺失的配置:', {
+        S3_BUCKET_NAME: config.S3_BUCKET_NAME || '未设置'
+      });
       // 使用图片占位服务
       imageUrls = files.map((file, index) => {
         return `https://picsum.photos/800/1200?random=${Date.now()}-${index}`;
@@ -83,7 +111,8 @@ export const uploadComic = async (req, res) => {
       description: description || '',
       tags: tags || '',
       user_id: req.user.id,
-      image_urls: imageUrls
+      image_urls: imageUrls,
+      '使用真实图片': imageUrls.some(url => !url.includes('picsum.photos')) ? '✅ 是' : '❌ 否'
     });
 
     // Create comic record - 使用 Sequelize 的 create 方法
@@ -96,7 +125,9 @@ export const uploadComic = async (req, res) => {
     });
 
     console.log('✅ 漫画记录创建成功，ID:', comic.id);
-    console.log('✅ 完整的漫画记录:', comic);
+    console.log('✅ 漫画标题:', comic.title);
+    console.log('✅ 使用的图片URL:', comic.image_urls);
+    console.log('✅ 是否使用真实S3图片:', comic.image_urls.some(url => !url.includes('picsum.photos')) ? '✅ 是' : '❌ 否');
 
     console.log('🎯 ========== uploadComic 控制器结束 ==========');
     
@@ -147,11 +178,17 @@ export const getAllComics = async (req, res) => {
     // 获取总数
     const total = await Comic.count();
 
+    const realImageComicsCount = comics.filter(comic => 
+      comic.image_urls && comic.image_urls.some(url => !url.includes('picsum.photos'))
+    ).length;
+
     console.log('✅ 获取漫画成功:', {
       总数: total,
       当前页: page,
       总页数: Math.ceil(total / limit),
-      漫画数量: comics?.length || 0
+      漫画数量: comics?.length || 0,
+      使用真实图片的漫画数量: realImageComicsCount,
+      使用占位图片的漫画数量: comics.length - realImageComicsCount
     });
 
     res.json({
@@ -188,10 +225,14 @@ export const getComic = async (req, res) => {
       });
     }
 
+    const usesRealImage = comic.image_urls && comic.image_urls.some(url => !url.includes('picsum.photos'));
+
     console.log('✅ 找到漫画:', {
       id: comic.id,
       title: comic.title,
-      用户ID: comic.user_id
+      用户ID: comic.user_id,
+      使用真实图片: usesRealImage ? '✅ 是' : '❌ 否',
+      图片URL: comic.image_urls
     });
 
     res.json({
@@ -231,12 +272,18 @@ export const getUserComics = async (req, res) => {
 
     const total = await Comic.count({ where: { user_id: req.user.id } });
 
+    const realImageComicsCount = comics.filter(comic => 
+      comic.image_urls && comic.image_urls.some(url => !url.includes('picsum.photos'))
+    ).length;
+
     console.log('✅ 获取用户漫画成功:', {
       用户ID: req.user.id,
       总数: total,
       当前页: page,
       总页数: Math.ceil(total / limit),
-      漫画数量: comics?.length || 0
+      漫画数量: comics?.length || 0,
+      使用真实图片的漫画数量: realImageComicsCount,
+      使用占位图片的漫画数量: comics.length - realImageComicsCount
     });
 
     res.json({
@@ -352,12 +399,17 @@ export const searchComics = async (req, res) => {
       }
     });
 
+    const realImageComicsCount = comics.filter(comic => 
+      comic.image_urls && comic.image_urls.some(url => !url.includes('picsum.photos'))
+    ).length;
+
     console.log('✅ 搜索成功:', {
       关键词: q,
       总数: total,
       当前页: page,
       总页数: Math.ceil(total / limit),
-      结果数量: comics?.length || 0
+      结果数量: comics?.length || 0,
+      使用真实图片的结果数量: realImageComicsCount
     });
 
     res.json({
