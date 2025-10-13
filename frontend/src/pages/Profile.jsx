@@ -64,31 +64,39 @@ const Profile = () => {
       })
       
       console.log('📡 完整响应对象:', response)
-      console.log('📡 响应状态:', response.status)
-      console.log('📡 响应数据:', response.data)
-      console.log('📡 响应数据类型:', typeof response.data)
+      console.log('📡 响应数据类型:', typeof response)
       
-      // 修复：直接检查 response.data 是否存在
-      if (response.data) {
+      // 修复：直接使用 response 对象，因为 response 本身就是数据
+      let responseData = response;
+      
+      // 如果 response 有 data 属性，使用 data
+      if (response.data !== undefined) {
+        responseData = response.data;
+        console.log('📡 使用 response.data:', responseData)
+      } else {
+        console.log('📡 直接使用 response 对象:', responseData)
+      }
+      
+      if (responseData) {
         console.log('✅ 成功获取到响应数据')
         
         // 检查不同的可能数据结构
         let allComics = []
         
-        if (response.data.comics && Array.isArray(response.data.comics)) {
+        if (responseData.comics && Array.isArray(responseData.comics)) {
           // 结构: {success: true, comics: [...]}
-          allComics = response.data.comics
+          allComics = responseData.comics
           console.log('📚 从 comics 字段获取漫画数据:', allComics)
-        } else if (response.data.data && Array.isArray(response.data.data)) {
+        } else if (responseData.data && Array.isArray(responseData.data)) {
           // 结构: {success: true, data: [...]}
-          allComics = response.data.data
+          allComics = responseData.data
           console.log('📚 从 data 字段获取漫画数据:', allComics)
-        } else if (Array.isArray(response.data)) {
+        } else if (Array.isArray(responseData)) {
           // 结构: 直接返回数组
-          allComics = response.data
+          allComics = responseData
           console.log('📚 直接获取漫画数据:', allComics)
         } else {
-          console.warn('⚠️ 未知的响应结构:', response.data)
+          console.warn('⚠️ 未知的响应结构:', responseData)
           allComics = []
         }
         
@@ -97,11 +105,13 @@ const Profile = () => {
         // 过滤出当前用户的漫画
         const myComics = allComics.filter(comic => {
           console.log(`🔍 检查漫画: ${comic.title}, 用户ID: ${comic.user_id}, 当前用户ID: ${currentUser.id}`)
-          return (
+          const isUserComic = (
             comic.user_id === currentUser.id || 
             comic.author_id === currentUser.id ||
             comic.author === currentUser.username
           )
+          console.log(`✅ 是否属于当前用户: ${isUserComic}`)
+          return isUserComic
         })
         
         console.log('🎯 过滤后的用户漫画:', myComics)
@@ -152,9 +162,9 @@ const Profile = () => {
         }
       })
 
-      console.log('✅ 删除响应:', response.data)
+      console.log('✅ 删除响应:', response)
 
-      if (response.data && response.data.success) {
+      if (response && response.success) {
         // 从列表中移除已删除的漫画
         setUserComics(prev => prev.filter(comic => comic.id !== comicId))
         alert('漫画删除成功')
