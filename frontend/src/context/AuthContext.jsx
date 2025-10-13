@@ -1,5 +1,4 @@
 import React, { createContext, useState, useEffect } from 'react'
-import authService from '../services/auth.jsx'
 
 export const AuthContext = createContext()
 
@@ -12,24 +11,21 @@ export const AuthProvider = ({ children }) => {
     initializeAuth()
   }, [])
 
-  const initializeAuth = async () => {
+  const initializeAuth = () => {
     try {
       const token = authService.getToken()
       const user = authService.getCurrentUser()
       
-      console.log('🔐 AuthContext 初始化:', {
-        hasToken: !!token,
-        hasUser: !!user,
+      console.log('🔐 AuthContext 初始化检查:', {
         token: token ? `存在 (${token.length} 字符)` : '不存在',
-        user: user
+        user: user ? `存在 (ID: ${user.id}, 用户名: ${user.username})` : '不存在'
       })
       
       if (user && token) {
-        console.log('✅ 从 authService 恢复用户:', user)
+        console.log('✅ 认证有效，设置当前用户')
         setCurrentUser(user)
       } else {
-        console.log('❌ 没有有效的用户数据，清除可能存在的无效数据')
-        // 清除可能存在的无效数据
+        console.log('❌ 认证数据不完整，清除可能存在的无效数据')
         if (token && !user) {
           console.log('⚠️  有 token 但没有用户信息，清除数据')
           authService.logout()
@@ -50,7 +46,7 @@ export const AuthProvider = ({ children }) => {
       setError(null)
       console.log('🔐 开始登录...')
       const response = await authService.login(email, password)
-      console.log('✅ 登录成功，用户:', response.user)
+      console.log('✅ 登录成功，设置用户:', response.user)
       setCurrentUser(response.user)
       return response
     } catch (error) {
@@ -65,7 +61,7 @@ export const AuthProvider = ({ children }) => {
       setError(null)
       console.log('🔐 开始注册...')
       const response = await authService.register(username, email, password)
-      console.log('✅ 注册成功，用户:', response.user)
+      console.log('✅ 注册成功，设置用户:', response.user)
       setCurrentUser(response.user)
       return response
     } catch (error) {
@@ -82,10 +78,22 @@ export const AuthProvider = ({ children }) => {
     setError(null)
   }
 
-  // 添加手动刷新用户状态的函数
+  // 强制刷新用户状态
   const refreshUser = () => {
     console.log('🔄 手动刷新用户状态')
-    initializeAuth()
+    const user = authService.getCurrentUser()
+    const token = authService.getToken()
+    
+    console.log('刷新检查:', {
+      user: user ? `ID: ${user.id}` : '不存在',
+      token: token ? '存在' : '不存在'
+    })
+    
+    if (user && token) {
+      setCurrentUser(user)
+    } else {
+      setCurrentUser(null)
+    }
   }
 
   const value = {
@@ -95,7 +103,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
-    refreshUser  // 添加这个函数
+    refreshUser
   }
 
   return (
