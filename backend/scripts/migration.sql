@@ -7,12 +7,12 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(20) DEFAULT 'user',  -- 添加这行
+    role VARCHAR(20) DEFAULT 'user',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create comics table
+-- Create comics table with views column
 CREATE TABLE IF NOT EXISTS comics (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
@@ -20,17 +20,19 @@ CREATE TABLE IF NOT EXISTS comics (
     tags VARCHAR(500),
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     image_urls TEXT[] NOT NULL,
-    views INTEGER DEFAULT 0,  -- 新增 views 列，默认值为 0
+    views INTEGER DEFAULT 0,  -- 添加 views 列
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create indexes
+-- Create basic indexes first
 CREATE INDEX IF NOT EXISTS idx_comics_user_id ON comics(user_id);
 CREATE INDEX IF NOT EXISTS idx_comics_created_at ON comics(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comics_tags ON comics USING gin(tags gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_comics_views ON comics(views DESC);  -- 新增按浏览量索引
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Create views index separately (确保列存在后再创建索引)
+CREATE INDEX IF NOT EXISTS idx_comics_views ON comics(views DESC);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
