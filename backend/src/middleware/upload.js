@@ -1,258 +1,135 @@
-import express from 'express';
-import { query } from '../config/database.js';
-import { verifyToken, getProfile } from '../controllers/authController.js';
-import { avatarUpload, handleAvatarUploadErrors } from '../middleware/upload.js';
-import { uploadToS3, deleteFromS3 } from '../utils/s3.js';
+import multer from 'multer';
 
-const router = express.Router();
+// 配置 multer
+const storage = multer.memoryStorage();
 
-// Get user profile
-router.get('/profile', verifyToken, async (req, res) => {
-    try {
-        await getProfile(req, res);
-    } catch (error) {
-        console.error('Profile route error:', error);
-        res.status(500).json({ error: 'Failed to fetch user profile' });
+// 通用的上传配置
+export const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB
+  },
+  fileFilter: (req, file, cb) => {
+    console.log('📁 文件过滤检查:', file.originalname, file.mimetype);
+    if (file.mimetype.startsWith('image/')) {
+      console.log('✅ 文件类型验证通过');
+      cb(null, true);
+    } else {
+      console.log('❌ 文件类型验证失败:', file.mimetype);
+      cb(new Error('只允许上传图片文件'), false);
     }
+  }
 });
 
-// Update user profile
-router.put('/profile', verifyToken, async (req, res) => {
-    try {
-        res.json({ message: 'Profile updated successfully' });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to update profile' });
+// 专门用于头像上传的配置（限制更严格）
+export const avatarUpload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB - 头像文件更小
+    files: 1 // 只允许一个文件
+  },
+  fileFilter: (req, file, cb) => {
+    console.log('🖼️ 头像文件过滤检查:', file.originalname, file.mimetype);
+    
+    // 允许的图片格式
+    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    
+    if (file.mimetype.startsWith('image/') && allowedMimeTypes.includes(file.mimetype)) {
+      console.log('✅ 头像文件类型验证通过');
+      cb(null, true);
+    } else {
+      console.log('❌ 头像文件类型验证失败:', file.mimetype);
+      cb(new Error('只支持 JPG, PNG, GIF, WebP 格式的图片'), false);
     }
+  }
 });
 
-// 更新用户头像 - 使用专门的头像上传配置
-router.put('/avatar', 
-    verifyToken, 
-    avatarUpload.single('avatar'), 
-    handleAvatarUploadErrors,
-    async (req, res) => {
-        try {
-            if (!req.file) {
-                return res.status(400).json({
-                    success: false,
-                    message: '请选择头像文件'
-                });
-            }
-
-            const userId = req.user.id;
-            
-            console.log('🔄 开始上传头像，用户ID:', userId);
-            console.log('📁 头像文件信息:', {
-                originalname: req.file.originalname,
-                mimetype: req.file.mimetype,
-                size: req.file.size
-            });
-
-            // 获取用户当前的头像信息
-            const userResult = await query(
-                'SELECT avatar FROM users WHERE id = $1',
-                [userId]
-            );
-
-            if (userResult.rows.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: '用户不存在'
-                });
-            }
-
-            const oldAvatarUrl = userResult.rows[0].avatar;
-
-            // 上传到 S3
-            console.log('☁️ 上传头像到S3...');
-            const avatarUrl = await uploadToS3(req.file, 'avatars', userId);
-            console.log('✅ S3上传成功，URL:', avatarUrl);
-
-            // 更新数据库中的头像URL
-            console.log('💾 更新数据库头像信息...');
-            await query(
-                'UPDATE users SET avatar = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-                [avatarUrl, userId]
-            );
-
-            // 如果存在旧头像，从S3删除
-            if (oldAvatarUrl) {
-                try {
-                    console.log('🗑️ 删除旧头像:', oldAvatarUrl);
-                    await deleteFromS3(oldAvatarUrl);
-                } catch (deleteError) {
-                    console.error('删除旧头像失败:', deleteError);
-                    // 不阻止整个操作，只是记录错误
-                }
-            }
-
-            console.log('✅ 头像更新完成');
-            res.json({
-                success: true,
-                message: '头像更新成功',
-                avatarUrl: avatarUrl
-            });
-
-        } catch (error) {
-            console.error('❌ 更新头像失败:', error);
-            
-            // 如果是S3相关的错误
-            if (error.message.includes('S3') || error.message.includes('AWS')) {
-                return res.status(500).json({
-                    success: false,
-                    message: '文件存储服务错误，请稍后重试'
-                });
-            }
-            
-            res.status(500).json({
-                success: false,
-                message: '头像更新失败: ' + error.message
-            });
-        }
+export const handleUploadErrors = (error, req, res, next) => {
+  console.log('📁 上传错误处理中间件被调用');
+  
+  if (error instanceof multer.MulterError) {
+    console.log('❌ Multer 错误:', error.code, error.message);
+    
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ 
+        success: false, 
+        message: '文件大小超过限制' 
+      });
+    } else if (error.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: '文件数量超过限制' 
+      });
+    } else if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({ 
+        success: false, 
+        message: '意外的文件字段' 
+      });
+    } else if (error.code === 'LIMIT_PART_COUNT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: '表单字段数量超过限制' 
+      });
     }
-);
-
-// 删除用户头像
-router.delete('/avatar', verifyToken, async (req, res) => {
-    try {
-        const userId = req.user.id;
-        
-        console.log('🗑️ 开始删除头像，用户ID:', userId);
-
-        // 获取用户当前的头像信息
-        const userResult = await query(
-            'SELECT avatar FROM users WHERE id = $1',
-            [userId]
-        );
-
-        if (userResult.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: '用户不存在'
-            });
-        }
-
-        const avatarUrl = userResult.rows[0].avatar;
-        
-        if (!avatarUrl) {
-            return res.status(400).json({
-                success: false,
-                message: '用户没有设置头像'
-            });
-        }
-
-        // 从S3删除头像文件
-        try {
-            console.log('☁️ 从S3删除头像文件:', avatarUrl);
-            await deleteFromS3(avatarUrl);
-        } catch (deleteError) {
-            console.error('删除S3头像文件失败:', deleteError);
-            // 继续执行，不中断
-        }
-
-        // 更新数据库，移除头像
-        console.log('💾 更新数据库，移除头像字段...');
-        await query(
-            'UPDATE users SET avatar = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-            [userId]
-        );
-
-        console.log('✅ 头像删除完成');
-        res.json({
-            success: true,
-            message: '头像删除成功'
-        });
-
-    } catch (error) {
-        console.error('❌ 删除头像失败:', error);
-        res.status(500).json({
-            success: false,
-            message: '头像删除失败: ' + error.message
-        });
+    
+    return res.status(400).json({ 
+      success: false, 
+      message: `上传错误: ${error.message}` 
+    });
+    
+  } else if (error) {
+    console.log('❌ 上传错误:', error.message);
+    
+    // 针对头像上传的特殊错误处理
+    if (error.message.includes('JPG') || error.message.includes('PNG') || error.message.includes('GIF') || error.message.includes('WebP')) {
+      return res.status(400).json({ 
+        success: false, 
+        message: error.message 
+      });
     }
-});
+    
+    return res.status(400).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+  
+  console.log('✅ 上传错误处理完成，无错误');
+  next();
+};
 
-// Get user's favorite comics
-router.get('/favorites', verifyToken, async (req, res) => {
-    try {
-        const favorites = [
-            { id: 1, title: 'Favorite Comic 1' },
-            { id: 2, title: 'Favorite Comic 2' }
-        ];
-        res.json(favorites);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch favorites' });
+// 专门的头像上传错误处理
+export const handleAvatarUploadErrors = (error, req, res, next) => {
+  console.log('🖼️ 头像上传错误处理中间件被调用');
+  
+  if (error instanceof multer.MulterError) {
+    console.log('❌ 头像上传 Multer 错误:', error.code, error.message);
+    
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ 
+        success: false, 
+        message: '头像文件大小不能超过2MB' 
+      });
+    } else if (error.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: '只能上传一个头像文件' 
+      });
     }
-});
-
-// 获取用户注册时间
-router.get('/registration-date/:userId', verifyToken, async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
-        console.log('🔍 查询用户注册时间，用户ID:', userId);
-        
-        const result = await query(
-            'SELECT id, username, created_at FROM users WHERE id = $1',
-            [userId]
-        );
-        
-        console.log('📊 查询结果:', result.rows);
-        
-        if (result.rows.length > 0) {
-            res.json({ 
-                success: true,
-                user_id: result.rows[0].id,
-                username: result.rows[0].username,
-                created_at: result.rows[0].created_at 
-            });
-        } else {
-            res.status(404).json({ 
-                success: false,
-                error: '用户未找到' 
-            });
-        }
-    } catch (error) {
-        console.error('❌ 获取注册时间错误:', error);
-        res.status(500).json({ 
-            success: false,
-            error: '服务器错误' 
-        });
-    }
-});
-
-// 获取用户详细信息（包含注册时间和头像）
-router.get('/:id', verifyToken, async (req, res) => {
-    try {
-        const { id } = req.params;
-        
-        console.log('🔍 获取用户详情，用户ID:', id);
-        
-        const result = await query(
-            'SELECT id, username, email, created_at, avatar FROM users WHERE id = $1',
-            [id]
-        );
-        
-        console.log('📊 用户详情结果:', result.rows);
-        
-        if (result.rows.length > 0) {
-            res.json({ 
-                success: true,
-                user: result.rows[0]
-            });
-        } else {
-            res.status(404).json({ 
-                success: false,
-                error: '用户未找到' 
-            });
-        }
-    } catch (error) {
-        console.error('❌ 获取用户信息错误:', error);
-        res.status(500).json({ 
-            success: false,
-            error: '服务器错误' 
-        });
-    }
-});
-
-export default router;
+    
+    return res.status(400).json({ 
+      success: false, 
+      message: `头像上传错误: ${error.message}` 
+    });
+    
+  } else if (error) {
+    console.log('❌ 头像上传错误:', error.message);
+    return res.status(400).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+  
+  console.log('✅ 头像上传错误处理完成，无错误');
+  next();
+};

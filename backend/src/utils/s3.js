@@ -313,3 +313,22 @@ export class S3Service {
     }
   }
 }
+
+// 添加命名导出函数以兼容现有代码
+export const uploadToS3 = async (file, folder, userId) => {
+  const filename = `${userId}-${Date.now()}-${file.originalname}`;
+  const result = await S3Service.uploadImage(file.buffer, filename, folder);
+  return result.url;
+};
+
+export const deleteFromS3 = async (fileUrl) => {
+  try {
+    // 从URL中提取key
+    const url = new URL(fileUrl);
+    const key = url.pathname.substring(1); // 移除开头的斜杠
+    await S3Service.deleteImage(key);
+  } catch (error) {
+    console.error('删除S3文件失败:', error);
+    throw error;
+  }
+};
