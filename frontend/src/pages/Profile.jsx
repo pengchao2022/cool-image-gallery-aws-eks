@@ -13,7 +13,6 @@ const Profile = () => {
   const [error, setError] = useState('')
   const navigate = useNavigate()
 
-  // 时间转换函数 - UTC 转北京时间
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
     
@@ -24,16 +23,13 @@ const Profile = () => {
         return '无效时间格式'
       }
       
-      // 转换为北京时间 (UTC+8)
       const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
       return beijingTime.toISOString().split('T')[0]
     } catch (error) {
-      console.error('时间转换错误:', error)
       return '时间转换错误'
     }
   }
 
-  // 获取注册时间 - 从 currentUser 中获取
   const getRegistrationDate = () => {
     if (currentUser?.created_at) {
       return formatToBeijingTime(currentUser.created_at)
@@ -47,164 +43,94 @@ const Profile = () => {
     }
   }, [currentUser, activeTab])
 
-  // 处理卡片点击 - 跳转到漫画详情页
   const handleCardClick = (comicId) => {
-    console.log(`🖱️ 点击漫画卡片ID: ${comicId}`)
     navigate(`/comic/${comicId}`)
   }
 
-  // 处理图片点击 - 跳转到漫画详情页
   const handleImageClick = (comicId, e) => {
-    e.stopPropagation() // 防止事件冒泡
-    console.log(`🖱️ 点击漫画图片ID: ${comicId}`)
+    e.stopPropagation()
     navigate(`/comic/${comicId}`)
   }
 
-  // 修复：从后端 API 获取所有漫画，然后过滤出当前用户的漫画
   const fetchUserComics = async () => {
     try {
       setLoading(true)
       setError('')
       
-      console.log('🔄 开始获取用户漫画...')
-      console.log('👤 当前用户ID:', currentUser.id)
-      
-      // 调用 API 获取所有漫画
       const response = await api.get('/comics', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       })
       
-      console.log('📡 完整响应对象:', response)
-      
-      // 修复：直接使用 response 对象，因为 response 本身就是数据
       let responseData = response;
       
-      // 如果 response 有 data 属性，使用 data
       if (response.data !== undefined) {
         responseData = response.data;
-        console.log('📡 使用 response.data:', responseData)
-      } else {
-        console.log('📡 直接使用 response 对象:', responseData)
       }
       
       if (responseData) {
-        console.log('✅ 成功获取到响应数据')
-        
-        // 检查不同的可能数据结构
         let allComics = []
         
         if (responseData.comics && Array.isArray(responseData.comics)) {
-          // 结构: {success: true, comics: [...]}
           allComics = responseData.comics
-          console.log('📚 从 comics 字段获取漫画数据:', allComics)
-          
-          // 调试：查看第一个漫画的完整结构
-          if (allComics.length > 0) {
-            console.log('🔍 第一个漫画的完整数据结构:', allComics[0])
-            console.log('🔍 第一个漫画的所有字段:', Object.keys(allComics[0]))
-          }
         } else if (responseData.data && Array.isArray(responseData.data)) {
-          // 结构: {success: true, data: [...]}
           allComics = responseData.data
-          console.log('📚 从 data 字段获取漫画数据:', allComics)
         } else if (Array.isArray(responseData)) {
-          // 结构: 直接返回数组
           allComics = responseData
-          console.log('📚 直接获取漫画数据:', allComics)
         } else {
-          console.warn('⚠️ 未知的响应结构:', responseData)
           allComics = []
         }
         
-        console.log('📖 所有漫画列表:', allComics)
+        const myComics = allComics.filter(comic => (
+          comic.user_id === currentUser.id || 
+          comic.author_id === currentUser.id ||
+          comic.author === currentUser.username
+        ))
         
-        // 过滤出当前用户的漫画
-        const myComics = allComics.filter(comic => {
-          console.log(`🔍 检查漫画: ${comic.title}, 用户ID: ${comic.user_id}, 当前用户ID: ${currentUser.id}`)
-          const isUserComic = (
-            comic.user_id === currentUser.id || 
-            comic.author_id === currentUser.id ||
-            comic.author === currentUser.username
-          )
-          console.log(`✅ 是否属于当前用户: ${isUserComic}`)
-          return isUserComic
-        })
-        
-        console.log('🎯 过滤后的用户漫画:', myComics)
         setUserComics(myComics)
       } else {
-        console.error('❌ 响应数据为空:', response)
         setError('获取漫画数据失败：响应数据为空')
         setUserComics([])
       }
     } catch (error) {
-      console.error('❌ 获取用户漫画失败:', error)
-      
       if (error.response) {
-        console.error('📡 错误状态:', error.response.status)
-        console.error('📄 错误数据:', error.response.data)
-        console.error('🔗 请求URL:', error.response.config?.url)
+        if (error.response.status === 401) {
+          logout()
+          navigate('/login')
+        }
       } else if (error.request) {
-        console.error('📡 网络错误，无响应:', error.request)
+        setError('获取漫画数据失败，请检查网络连接')
       } else {
-        console.error('📡 其他错误:', error.message)
+        setError('获取漫画数据失败')
       }
-      
-      setError('获取漫画数据失败，请检查网络连接')
       setUserComics([])
-      
-      // 如果是 401 未授权，可能是 token 过期，强制登出
-      if (error.response && error.response.status === 401) {
-        logout()
-        navigate('/login')
-      }
     } finally {
       setLoading(false)
     }
   }
 
-  // 获取图片URL - 修复图片显示问题
   const getImageUrl = (comic) => {
-    console.log(`🔍 漫画 "${comic.title}" 的所有字段:`, Object.keys(comic));
-    console.log(`🔍 漫画 "${comic.title}" 的完整数据:`, comic);
-    
-    // 检查 image_urls 字段（复数形式）
     if (comic.image_urls) {
-      console.log(`✅ 找到 image_urls 字段:`, comic.image_urls);
-      
-      // 如果 image_urls 是数组，取第一个图片
       if (Array.isArray(comic.image_urls) && comic.image_urls.length > 0) {
         const firstImageUrl = comic.image_urls[0];
-        console.log(`🖼️ 使用数组中的第一个图片:`, firstImageUrl);
         
-        // 如果URL是相对路径，添加基础URL
         if (firstImageUrl && firstImageUrl.startsWith('/')) {
-          const fullUrl = `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${firstImageUrl}`;
-          console.log(`🖼️ 完整图片URL:`, fullUrl);
-          return fullUrl;
+          return `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${firstImageUrl}`;
         }
         
         return firstImageUrl;
-      } 
-      // 如果 image_urls 是字符串，直接使用
-      else if (typeof comic.image_urls === 'string') {
+      } else if (typeof comic.image_urls === 'string') {
         const imageUrl = comic.image_urls;
-        console.log(`🖼️ image_urls 是字符串:`, imageUrl);
         
-        // 如果URL是相对路径，添加基础URL
         if (imageUrl.startsWith('/')) {
-          const fullUrl = `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
-          console.log(`🖼️ 完整图片URL:`, fullUrl);
-          return fullUrl;
+          return `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
         }
         
         return imageUrl;
       }
     }
     
-    // 检查其他可能的图片URL字段
     const possibleImageFields = [
       'image_url', 'cover_url', 'coverImage', 'image', 
       'cover', 'thumbnail', 'picture', 'photo',
@@ -214,70 +140,47 @@ const Profile = () => {
     
     for (const field of possibleImageFields) {
       if (comic[field]) {
-        console.log(`✅ 找到图片字段 "${field}":`, comic[field]);
         const imageUrl = comic[field];
         
-        // 如果URL是相对路径，添加基础URL
         if (imageUrl.startsWith('/')) {
-          const fullUrl = `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
-          console.log(`🖼️ 完整图片URL:`, fullUrl);
-          return fullUrl;
+          return `http://k8s-comicwebsite-3792dbd863-1173649943.us-east-1.elb.amazonaws.com${imageUrl}`;
         }
         
-        console.log(`🖼️ 图片URL:`, imageUrl);
         return imageUrl;
       }
     }
     
-    console.warn(`⚠️ 漫画 "${comic.title}" 没有找到图片URL字段`);
-    
-    // 如果没有图片，使用默认的占位图
     return 'https://placehold.co/300x200/6c5ce7/white?text=No+Image&font=roboto';
   }
 
-  // 处理图片加载错误
   const handleImageError = (e, comic) => {
-    console.error(`❌ 图片加载失败: ${comic.title}`, e);
     e.target.src = 'https://placehold.co/300x200/d63031/white?text=Image+Error&font=roboto';
     e.target.alt = `无法加载图片: ${comic.title}`;
   }
 
-  // 处理漫画删除
   const handleDeleteComic = async (comicId) => {
     if (!window.confirm('确定要删除这个漫画吗？此操作不可恢复。')) {
       return
     }
 
     try {
-      console.log('🗑️ 开始删除漫画:', comicId)
-      
       const response = await api.delete(`/comics/${comicId}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       })
 
-      console.log('✅ 删除响应:', response)
-
       if (response && response.success) {
-        // 从列表中移除已删除的漫画
         setUserComics(prev => prev.filter(comic => comic.id !== comicId))
         alert('漫画删除成功')
       } else {
         alert('删除失败，请重试')
       }
     } catch (error) {
-      console.error('❌ 删除漫画失败:', error)
-      if (error.response) {
-        console.error('📡 删除错误状态:', error.response.status)
-        console.error('📄 删除错误数据:', error.response.data)
-        console.error('🔗 删除请求URL:', error.response.config?.url)
-      }
       alert('删除失败，请检查网络连接')
     }
   }
 
-  // 处理漫画编辑
   const handleEditComic = (comicId) => {
     navigate(`/edit-comic/${comicId}`)
   }
@@ -342,7 +245,6 @@ const Profile = () => {
         gridTemplateColumns: '250px 1fr',
         gap: '30px'
       }}>
-        {/* 侧边栏导航 */}
         <div className="profile-sidebar" style={{
           background: 'white',
           borderRadius: '10px',
@@ -413,7 +315,6 @@ const Profile = () => {
           </nav>
         </div>
 
-        {/* 主要内容区域 */}
         <div className="profile-main" style={{
           background: 'white',
           borderRadius: '10px',
@@ -514,7 +415,7 @@ const Profile = () => {
                         transition: 'transform 0.3s, box-shadow 0.3s',
                         background: 'white',
                         boxShadow: '0 3px 10px rgba(0,0,0,0.1)',
-                        cursor: 'pointer' // 添加指针光标
+                        cursor: 'pointer'
                       }}
                     >
                       <img 
@@ -525,7 +426,7 @@ const Profile = () => {
                           width: '100%',
                           height: '180px',
                           objectFit: 'cover',
-                          cursor: 'pointer' // 图片也添加指针光标
+                          cursor: 'pointer'
                         }}
                         onError={(e) => handleImageError(e, comic)}
                       />
@@ -550,7 +451,7 @@ const Profile = () => {
                           <button 
                             className="btn btn-outline"
                             onClick={(e) => {
-                              e.stopPropagation(); // 防止事件冒泡
+                              e.stopPropagation();
                               handleEditComic(comic.id);
                             }}
                             style={{ flex: 1, padding: '8px 12px', fontSize: '0.8rem' }}
@@ -560,7 +461,7 @@ const Profile = () => {
                           <button 
                             className="btn btn-outline"
                             onClick={(e) => {
-                              e.stopPropagation(); // 防止事件冒泡
+                              e.stopPropagation();
                               handleDeleteComic(comic.id);
                             }}
                             style={{ 
