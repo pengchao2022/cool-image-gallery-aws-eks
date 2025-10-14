@@ -44,6 +44,19 @@ const Home = () => {
     fetchComics()
   }, [])
 
+  // 处理特性卡片点击
+  const handleFeatureClick = (feature) => {
+    console.log(`🖱️ 点击特性: ${feature}`)
+    if (feature === '海量漫画') {
+      navigate('/browse') // 跳转到浏览页面
+    } else if (feature === '轻松上传') {
+      navigate('/upload') // 跳转到上传页面
+    } else if (feature === '社区互动') {
+      // 可以跳转到社区页面或其他相关页面
+      navigate('/community')
+    }
+  }
+
   // 处理卡片点击 - 跳转到漫画详情页
   const handleCardClick = (comicId) => {
     console.log(`🖱️ 点击漫画卡片ID: ${comicId}`)
@@ -106,17 +119,29 @@ const Home = () => {
         <div className="container">
           <h2>为什么选择漫画世界？</h2>
           <div className="features-grid">
-            <div className="feature-card">
+            <div 
+              className="feature-card"
+              onClick={() => handleFeatureClick('海量漫画')}
+              style={{ cursor: 'pointer' }}
+            >
               <i className="fas fa-book-open"></i>
               <h3>海量漫画</h3>
               <p>浏览数千部精彩漫画作品，涵盖各种题材和风格</p>
             </div>
-            <div className="feature-card">
+            <div 
+              className="feature-card"
+              onClick={() => handleFeatureClick('轻松上传')}
+              style={{ cursor: 'pointer' }}
+            >
               <i className="fas fa-upload"></i>
               <h3>轻松上传</h3>
               <p>简单易用的上传功能，快速分享您的创作</p>
             </div>
-            <div className="feature-card">
+            <div 
+              className="feature-card"
+              onClick={() => handleFeatureClick('社区互动')}
+              style={{ cursor: 'pointer' }}
+            >
               <i className="fas fa-users"></i>
               <h3>社区互动</h3>
               <p>与创作者和其他读者交流，发现更多精彩内容</p>
