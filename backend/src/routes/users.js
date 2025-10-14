@@ -30,7 +30,8 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
     try {
         console.log('🔍 ========== 头像上传路由调试开始 ==========');
         console.log('🔍 req.user:', req.user);
-        console.log('🔍 req.user.id:', req.user?.id);
+        console.log('🔍 req.user.userId:', req.user?.userId);
+        console.log('🔍 req.user.id:', req.user?.id); // 这个可能是 undefined
         
         if (!req.file) {
             return res.status(400).json({
@@ -39,8 +40,8 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
             });
         }
 
-        // 关键修复：使用正确的用户ID字段
-        const userId = req.user?.id;
+        // 关键修复：使用 userId 而不是 id
+        const userId = req.user?.userId;
         
         console.log('🔄 开始上传头像，用户ID:', userId);
         console.log('📁 文件信息:', {
@@ -133,7 +134,8 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
 // 删除用户头像
 router.delete('/avatar', verifyToken, async (req, res) => {
     try {
-        const userId = req.user.id;
+        // 修复：使用 userId 而不是 id
+        const userId = req.user.userId;
         
         console.log('🗑️ 开始删除头像，用户ID:', userId);
 
