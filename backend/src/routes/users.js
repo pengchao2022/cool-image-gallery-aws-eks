@@ -25,6 +25,83 @@ router.put('/profile', verifyToken, async (req, res) => {
     }
 });
 
+// 头像代理路由 - 绕过 CORS
+router.get('/avatar-proxy/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    console.log('🔍 头像代理 - 获取用户头像，用户ID:', userId);
+    
+    const userResult = await query(
+      'SELECT avatar FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (!userResult || userResult.length === 0 || !userResult[0].avatar) {
+      console.log('❌ 头像代理 - 用户或头像未找到');
+      return res.status(404).json({ 
+        success: false,
+        message: '用户或头像未找到' 
+      });
+    }
+
+    const avatarUrl = userResult[0].avatar;
+    
+    console.log('🔍 头像代理 - 原始URL:', avatarUrl);
+    
+    // 如果是 S3 URL，通过后端代理访问
+    if (avatarUrl.includes('s3.amazonaws.com')) {
+      try {
+        console.log('🌐 头像代理 - 开始从S3获取图片...');
+        const s3Response = await fetch(avatarUrl);
+        
+        console.log('🔍 头像代理 - S3响应状态:', s3Response.status);
+        
+        if (!s3Response.ok) {
+          console.error('❌ 头像代理 - S3访问失败:', s3Response.status);
+          return res.status(s3Response.status).json({
+            success: false,
+            message: `S3访问失败: ${s3Response.status}`
+          });
+        }
+
+        // 设置正确的 Content-Type
+        const contentType = s3Response.headers.get('content-type') || 'image/jpeg';
+        console.log('🔍 头像代理 - Content-Type:', contentType);
+        
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // 缓存1小时
+        res.setHeader('Access-Control-Allow-Origin', '*'); // 允许所有来源访问
+        
+        // 将图片数据流式传输到客户端
+        const arrayBuffer = await s3Response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        console.log('✅ 头像代理 - 成功返回图片数据，大小:', buffer.length, 'bytes');
+        res.send(buffer);
+        
+      } catch (s3Error) {
+        console.error('❌ 头像代理 - S3访问失败:', s3Error);
+        return res.status(500).json({
+          success: false,
+          message: '头像代理失败: ' + s3Error.message
+        });
+      }
+    } else {
+      // 如果不是S3 URL，直接重定向
+      console.log('🔍 头像代理 - 非S3 URL，直接重定向');
+      res.redirect(avatarUrl);
+    }
+    
+  } catch (error) {
+    console.error('❌ 头像代理失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '头像代理失败: ' + error.message
+    });
+  }
+});
+
 // 更新用户头像
 router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => {
     try {
@@ -160,7 +237,8 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
         const response = {
             success: true,
             message: '头像更新成功',
-            avatarUrl: avatarUrl
+            avatarUrl: avatarUrl,
+            proxyUrl: `/api/users/avatar-proxy/${userId}` // 同时返回代理URL
         };
         
         console.log('📤 返回响应:', response);
