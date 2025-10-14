@@ -16,6 +16,9 @@ const Profile = () => {
   const fileInputRef = useRef(null)
   const navigate = useNavigate()
 
+  // 添加调试日志
+  console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu);
+
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
     
@@ -38,11 +41,6 @@ const Profile = () => {
       return formatToBeijingTime(currentUser.created_at)
     }
     return '暂不可用'
-  }
-
-  // 点击头像显示菜单
-  const handleAvatarClick = () => {
-    setShowAvatarMenu(!showAvatarMenu)
   }
 
   // 点击菜单外部关闭菜单
@@ -338,7 +336,16 @@ const Profile = () => {
         <div className="avatar-container" style={{ position: 'relative', marginRight: '30px' }}>
           <div 
             className="user-avatar-large"
-            onClick={handleAvatarClick}
+            onClick={(e) => {
+              console.log('🎯 头像被点击了！内联事件');
+              e.stopPropagation();
+              e.preventDefault();
+              setShowAvatarMenu(prev => {
+                const newState = !prev;
+                console.log('🎯 设置新状态:', newState);
+                return newState;
+              });
+            }}
             style={{
               width: '100px',
               height: '100px',
@@ -353,7 +360,8 @@ const Profile = () => {
               cursor: 'pointer',
               border: currentUser.avatar ? '3px solid var(--primary)' : 'none',
               overflow: 'hidden',
-              position: 'relative'
+              position: 'relative',
+              zIndex: 10
             }}
           >
             {currentUser.avatar ? (
@@ -401,45 +409,28 @@ const Profile = () => {
             )}
           </div>
 
-          {/* 头像菜单 */}
-          {showAvatarMenu && (
-            <div style={{
-              position: 'absolute',
-              top: '110%',
-              left: 0,
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-              padding: '8px 0',
-              minWidth: '150px',
-              zIndex: 1000,
-              border: '1px solid #eee'
-            }}>
-              <button
-                onClick={handleUploadClick}
-                style={{
-                  width: '100%',
-                  padding: '10px 16px',
-                  textAlign: 'left',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '14px',
-                  color: '#333'
-                }}
-                onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-              >
-                <i className="fas fa-upload"></i>
-                上传头像
-              </button>
-              
-              {currentUser.avatar && (
+          {/* 头像菜单 - 添加调试信息 */}
+          {(() => {
+            console.log('🔄 检查菜单渲染，showAvatarMenu:', showAvatarMenu);
+            return showAvatarMenu && (
+              <div style={{
+                position: 'absolute',
+                top: '110%',
+                left: 0,
+                backgroundColor: 'white',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                padding: '8px 0',
+                minWidth: '150px',
+                zIndex: 1000,
+                border: '1px solid #eee'
+              }}>
                 <button
-                  onClick={handleRemoveAvatar}
+                  onClick={(e) => {
+                    console.log('📤 点击上传头像');
+                    e.stopPropagation();
+                    handleUploadClick();
+                  }}
                   style={{
                     width: '100%',
                     padding: '10px 16px',
@@ -451,17 +442,45 @@ const Profile = () => {
                     alignItems: 'center',
                     gap: '8px',
                     fontSize: '14px',
-                    color: 'var(--danger)'
+                    color: '#333'
                   }}
                   onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
                   onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                 >
-                  <i className="fas fa-trash"></i>
-                  移除头像
+                  <i className="fas fa-upload"></i>
+                  上传头像
                 </button>
-              )}
-            </div>
-          )}
+                
+                {currentUser.avatar && (
+                  <button
+                    onClick={(e) => {
+                      console.log('🗑️ 点击移除头像');
+                      e.stopPropagation();
+                      handleRemoveAvatar();
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 16px',
+                      textAlign: 'left',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '14px',
+                      color: 'var(--danger)'
+                    }}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                  >
+                    <i className="fas fa-trash"></i>
+                    移除头像
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 隐藏的文件输入 */}
           <input
