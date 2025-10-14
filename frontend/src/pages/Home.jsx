@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { AuthContext } from '../context/AuthContext.jsx'
 import './Home.css'
 
@@ -8,6 +8,7 @@ const Home = () => {
   const [comics, setComics] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const navigate = useNavigate() // 添加导航钩子
 
   // 加载漫画数据
   useEffect(() => {
@@ -42,6 +43,19 @@ const Home = () => {
 
     fetchComics()
   }, [])
+
+  // 处理卡片点击 - 跳转到漫画详情页
+  const handleCardClick = (comicId) => {
+    console.log(`🖱️ 点击漫画卡片ID: ${comicId}`)
+    navigate(`/comic/${comicId}`) // 跳转到漫画详情页
+  }
+
+  // 处理图片点击 - 跳转到漫画详情页
+  const handleImageClick = (comicId, e) => {
+    e.stopPropagation() // 防止事件冒泡
+    console.log(`🖱️ 点击漫画图片ID: ${comicId}`)
+    navigate(`/comic/${comicId}`) // 跳转到漫画详情页
+  }
 
   // 处理图片加载失败
   const handleImageError = (e, comic) => {
@@ -150,7 +164,12 @@ const Home = () => {
               <div className="preview-grid">
                 {comics.length > 0 ? (
                   comics.map((comic) => (
-                    <div key={comic.id} className="preview-card">
+                    <div 
+                      key={comic.id} 
+                      className="preview-card"
+                      onClick={() => handleCardClick(comic.id)}
+                      style={{ cursor: 'pointer' }} // 添加指针光标
+                    >
                       <div className="preview-image">
                         {comic.image_urls && comic.image_urls[0] ? (
                           <img 
@@ -158,9 +177,17 @@ const Home = () => {
                             alt={comic.title}
                             onError={(e) => handleImageError(e, comic)}
                             onLoad={(e) => handleImageLoad(e, comic)}
+                            onClick={(e) => handleImageClick(comic.id, e)}
+                            style={{ cursor: 'pointer' }} // 图片也添加指针光标
                           />
                         ) : (
-                          <div className="no-image">暂无图片</div>
+                          <div 
+                            className="no-image"
+                            onClick={(e) => handleImageClick(comic.id, e)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            暂无图片
+                          </div>
                         )}
                       </div>
                       <div className="preview-info">
