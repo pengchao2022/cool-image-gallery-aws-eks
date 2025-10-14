@@ -30,7 +30,6 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
     try {
         console.log('🔍 ========== 头像上传路由调试开始 ==========');
         console.log('🔍 req.user:', req.user);
-        console.log('🔍 req.user.userId:', req.user?.userId);
         
         if (!req.file) {
             return res.status(400).json({
@@ -42,14 +41,8 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
         const userId = req.user?.userId;
         
         console.log('🔄 开始上传头像，用户ID:', userId);
-        console.log('📁 文件信息:', {
-            originalname: req.file.originalname,
-            mimetype: req.file.mimetype,
-            size: req.file.size
-        });
 
         if (!userId) {
-            console.error('❌ 用户ID未定义，req.user:', req.user);
             return res.status(401).json({
                 success: false,
                 message: '用户认证信息不完整'
@@ -72,11 +65,11 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
             });
         }
 
-        // 获取用户当前的头像信息 - 使用原生查询
-        console.log('💾 查询数据库用户信息...');
+        // 获取用户当前的头像信息
+        console.log('💾 查询当前头像信息...');
         const userResult = await query(
-            'SELECT avatar FROM users WHERE id = ?',  // 使用 ? 作为占位符
-            [userId]  // 参数数组
+            'SELECT avatar FROM users WHERE id = ?',
+            [userId]
         );
 
         console.log('📊 用户查询结果:', userResult);
@@ -90,45 +83,101 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
         }
 
         const oldAvatarUrl = userResult[0].avatar;
+        console.log('📸 当前头像URL:', oldAvatarUrl);
 
         // 上传到 S3
         console.log('☁️ 上传头像到S3...');
-        const avatarUrl = await uploadToS3(req.file, 'avatars', userId);
-        console.log('✅ S3上传成功，URL:', avatarUrl);
+        let avatarUrl;
+        try {
+            avatarUrl = await uploadToS3(req.file, 'avatars', userId);
+            console.log('✅ S3上传成功，URL:', avatarUrl);
+        } catch (s3Error) {
+            console.error('❌ S3上传失败:', s3Error);
+            return res.status(500).json({
+                success: false,
+                message: '文件上传失败: ' + s3Error.message
+            });
+        }
 
         // 更新数据库中的头像URL
         console.log('💾 更新数据库头像信息...');
-        const updateResult = await query(
-            'UPDATE users SET avatar = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [avatarUrl, userId]
-        );
+        try {
+            const updateResult = await query(
+                'UPDATE users SET avatar = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [avatarUrl, userId]
+            );
+            console.log('📊 数据库更新结果:', updateResult);
+        } catch (dbError) {
+            console.error('❌ 数据库更新失败:', dbError);
+            // 如果数据库更新失败，尝试删除刚上传的S3文件
+            try {
+                await deleteFromS3(avatarUrl);
+                console.log('🗑️ 已回滚删除刚上传的S3文件');
+            } catch (rollbackError) {
+                console.error('❌ 回滚失败:', rollbackError);
+            }
+            
+            return res.status(500).json({
+                success: false,
+                message: '数据库更新失败: ' + dbError.message
+            });
+        }
 
-        console.log('📊 更新结果:', updateResult);
+        // 验证数据库更新是否成功
+        console.log('🔍 验证数据库更新...');
+        const verifyResult = await query(
+            'SELECT avatar FROM users WHERE id = ?',
+            [userId]
+        );
+        
+        if (verifyResult && verifyResult.length > 0) {
+            const newAvatarUrl = verifyResult[0].avatar;
+            console.log('✅ 数据库更新验证成功，新头像URL:', newAvatarUrl);
+            
+            if (newAvatarUrl !== avatarUrl) {
+                console.error('❌ 数据库验证失败: 存储的URL与上传的URL不匹配');
+                console.error('📤 上传的URL:', avatarUrl);
+                console.error('💾 存储的URL:', newAvatarUrl);
+            }
+        } else {
+            console.error('❌ 数据库验证失败: 无法获取更新后的用户数据');
+        }
 
         // 如果存在旧头像，从S3删除
-        if (oldAvatarUrl) {
+        if (oldAvatarUrl && oldAvatarUrl !== avatarUrl) {
             try {
                 console.log('🗑️ 删除旧头像:', oldAvatarUrl);
                 await deleteFromS3(oldAvatarUrl);
+                console.log('✅ 旧头像删除成功');
             } catch (deleteError) {
-                console.error('删除旧头像失败:', deleteError);
-                // 不阻止整个操作，只是记录错误
+                console.error('⚠️ 删除旧头像失败（不影响主要操作）:', deleteError);
             }
         }
 
-        console.log('✅ 头像更新完成');
-        res.json({
+        console.log('✅ 头像更新流程完成');
+        
+        // 确保返回正确的响应格式
+        const response = {
             success: true,
             message: '头像更新成功',
             avatarUrl: avatarUrl
-        });
+        };
+        
+        console.log('📤 返回响应:', response);
+        res.json(response);
 
     } catch (error) {
         console.error('❌ 更新头像失败:', error);
-        res.status(500).json({
+        
+        // 返回详细的错误信息
+        const errorResponse = {
             success: false,
-            message: '头像更新失败: ' + error.message
-        });
+            message: '头像更新失败: ' + error.message,
+            error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        };
+        
+        console.error('📤 返回错误响应:', errorResponse);
+        res.status(500).json(errorResponse);
     }
 });
 
@@ -139,7 +188,6 @@ router.delete('/avatar', verifyToken, async (req, res) => {
         
         console.log('🗑️ 开始删除头像，用户ID:', userId);
 
-        // 获取用户当前的头像信息
         const userResult = await query(
             'SELECT avatar FROM users WHERE id = ?',
             [userId]
@@ -167,7 +215,6 @@ router.delete('/avatar', verifyToken, async (req, res) => {
             await deleteFromS3(avatarUrl);
         } catch (deleteError) {
             console.error('删除S3头像文件失败:', deleteError);
-            // 继续执行，不中断
         }
 
         // 更新数据库，移除头像
@@ -217,8 +264,6 @@ router.get('/registration-date/:userId', verifyToken, async (req, res) => {
             [userId]
         );
         
-        console.log('📊 查询结果:', result);
-        
         if (result && result.length > 0) {
             res.json({ 
                 success: true,
@@ -252,8 +297,6 @@ router.get('/:id', verifyToken, async (req, res) => {
             'SELECT id, username, email, created_at, avatar FROM users WHERE id = ?',
             [id]
         );
-        
-        console.log('📊 用户详情结果:', result);
         
         if (result && result.length > 0) {
             res.json({ 
