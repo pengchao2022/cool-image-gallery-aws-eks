@@ -18,6 +18,58 @@ const Profile = () => {
 
   console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu, 'currentUser:', currentUser);
 
+  // S3 权限调试函数
+  const debugS3Access = async (avatarUrl) => {
+    if (!avatarUrl) return;
+    
+    console.log('🔍 ========== S3 权限调试开始 ==========');
+    console.log('🔍 头像URL:', avatarUrl);
+    
+    try {
+      // 测试直接访问
+      console.log('🌐 测试直接访问S3 URL...');
+      const directResponse = await fetch(avatarUrl, { method: 'HEAD' });
+      console.log('🔍 直接访问状态:', directResponse.status);
+      console.log('🔍 直接访问状态文本:', directResponse.statusText);
+      
+      if (directResponse.status === 403) {
+        console.log('❌ S3 访问被拒绝 (403) - 存储桶权限问题');
+        console.log('💡 解决方案:');
+        console.log('1. 检查S3存储桶的公共访问设置');
+        console.log('2. 添加存储桶策略允许公开读取');
+        console.log('3. 或者在后端添加头像代理路由');
+      } else if (directResponse.status === 404) {
+        console.log('❌ S3 文件未找到 (404)');
+      } else if (directResponse.status === 200) {
+        console.log('✅ S3 访问正常 (200)');
+      }
+      
+      // 测试通过后端代理访问（如果存在）
+      console.log('🌐 测试通过后端代理访问...');
+      try {
+        const proxyResponse = await fetch(`/api/users/avatar-proxy?url=${encodeURIComponent(avatarUrl)}`, { 
+          method: 'HEAD' 
+        });
+        console.log('🔍 代理访问状态:', proxyResponse.status);
+      } catch (proxyError) {
+        console.log('❌ 代理访问失败（可能没有代理路由）:', proxyError.message);
+      }
+      
+    } catch (error) {
+      console.log('❌ S3 访问测试失败:', error.message);
+    }
+    
+    console.log('🔍 ========== S3 权限调试结束 ==========');
+  };
+
+  // 检查当前用户头像的S3访问权限
+  useEffect(() => {
+    if (currentUser?.avatar && currentUser.avatar.includes('s3.amazonaws.com')) {
+      console.log('🔍 检测到S3头像URL，开始权限检查...');
+      debugS3Access(currentUser.avatar);
+    }
+  }, [currentUser]);
+
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
     
@@ -114,32 +166,74 @@ const Profile = () => {
 
       console.log('📡 收到完整响应:', result);
       
-      // 🔥 关键修改：直接使用 result，不需要 result.data
       if (result && result.success) {
         console.log('✅ 头像上传成功:', result.avatarUrl);
         
-        // 更新用户信息
-        const updatedUser = { 
-          ...currentUser, 
-          avatar: result.avatarUrl 
-        };
-        updateUser(updatedUser);
+        // 🔍 调试S3权限
+        await debugS3Access(result.avatarUrl);
         
-        // 更新本地存储的用户信息
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          const userData = JSON.parse(storedUser);
-          userData.avatar = result.avatarUrl;
-          localStorage.setItem('user', JSON.stringify(userData));
+        // 🔍 调试：检查 updateUser 函数
+        console.log('🔍 ========== 更新用户信息调试开始 ==========');
+        console.log('🔍 updateUser 函数类型:', typeof updateUser);
+        console.log('🔍 当前用户:', currentUser);
+        console.log('🔍 新头像URL:', result.avatarUrl);
+        
+        try {
+          // 更新用户信息
+          const updatedUser = { 
+            ...currentUser, 
+            avatar: result.avatarUrl 
+          };
+          console.log('🔍 更新后的用户对象:', updatedUser);
+          
+          // 检查 updateUser 是否存在且是函数
+          if (typeof updateUser === 'function') {
+            console.log('🔍 准备调用 updateUser...');
+            updateUser(updatedUser);
+            console.log('✅ updateUser 调用成功');
+          } else {
+            console.error('❌ updateUser 不是函数:', updateUser);
+            console.log('🔍 尝试直接更新本地存储...');
+          }
+          
+          // 更新本地存储的用户信息
+          const storedUser = localStorage.getItem('user');
+          console.log('🔍 本地存储的用户数据:', storedUser);
+          
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            console.log('🔍 解析后的用户数据:', userData);
+            userData.avatar = result.avatarUrl;
+            localStorage.setItem('user', JSON.stringify(userData));
+            console.log('✅ 本地存储更新成功');
+          } else {
+            console.warn('⚠️ 本地存储中没有找到用户数据');
+          }
+          
+          console.log('🔍 ========== 更新用户信息调试结束 ==========');
+          
+          // 即使S3有权限问题，也显示成功消息
+          alert('头像更新成功！如果头像不显示，可能是S3权限问题，请联系管理员。');
+        } catch (updateError) {
+          console.error('❌ 更新用户信息失败:', updateError);
+          console.error('❌ 错误详情:', updateError.message);
+          console.error('❌ 错误堆栈:', updateError.stack);
+          
+          // 检查是否是S3权限问题导致的错误
+          if (updateError.message.includes('S3') || updateError.message.includes('403')) {
+            alert('头像上传成功！但S3权限配置有问题，请联系管理员修复存储桶权限。');
+          } else {
+            alert('头像上传成功！但页面更新失败，请刷新页面查看新头像。');
+          }
         }
-        
-        alert('头像更新成功！');
       } else {
         console.error('❌ 响应格式不正确:', result);
         setError(result?.message || '头像上传失败：服务器返回错误格式');
       }
     } catch (error) {
       console.error('❌ 头像上传失败:', error);
+      console.error('❌ 错误详情:', error.message);
+      console.error('❌ 错误堆栈:', error.stack);
       
       // 处理错误响应
       if (error.status === 401) {
@@ -187,28 +281,45 @@ const Profile = () => {
 
       console.log('🗑️ 移除头像响应:', result);
 
-      // 🔥 修改：直接使用 result，不需要 result.data
       if (result && result.success) {
-        // 更新用户信息，移除头像
-        const updatedUser = { ...currentUser };
-        delete updatedUser.avatar;
-        updateUser(updatedUser);
+        console.log('🗑️ 移除头像成功');
         
-        // 更新本地存储
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          const userData = JSON.parse(storedUser);
-          delete userData.avatar;
-          localStorage.setItem('user', JSON.stringify(userData));
+        // 调试：检查 updateUser 函数
+        console.log('🔍 移除头像 - updateUser 类型:', typeof updateUser);
+        
+        try {
+          // 更新用户信息，移除头像
+          const updatedUser = { ...currentUser };
+          delete updatedUser.avatar;
+          
+          if (typeof updateUser === 'function') {
+            updateUser(updatedUser);
+            console.log('✅ 移除头像 - updateUser 调用成功');
+          } else {
+            console.error('❌ 移除头像 - updateUser 不是函数');
+          }
+          
+          // 更新本地存储
+          const storedUser = localStorage.getItem('user');
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            delete userData.avatar;
+            localStorage.setItem('user', JSON.stringify(userData));
+            console.log('✅ 移除头像 - 本地存储更新成功');
+          }
+          
+          setShowAvatarMenu(false);
+          alert('头像已移除');
+        } catch (updateError) {
+          console.error('❌ 移除头像 - 更新用户信息失败:', updateError);
+          alert('头像移除成功！但页面更新失败，请刷新页面查看效果。');
         }
-        
-        setShowAvatarMenu(false);
-        alert('头像已移除');
       } else {
         setError('移除头像失败');
       }
     } catch (error) {
       console.error('移除头像失败:', error);
+      console.error('移除头像错误详情:', error.message);
       
       if (error.response && error.response.status === 401) {
         setError('登录已过期，请重新登录');
@@ -449,7 +560,11 @@ const Profile = () => {
                   objectFit: 'cover'
                 }}
                 onError={(e) => {
+                  console.log('❌ 头像加载失败，可能是S3权限问题');
                   e.target.style.display = 'none';
+                }}
+                onLoad={(e) => {
+                  console.log('✅ 头像加载成功');
                 }}
               />
             ) : null}
