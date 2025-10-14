@@ -62,7 +62,7 @@ const Profile = () => {
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传 - 修复 multipart boundary 错误
+  // 处理头像上传 - 修复 JWT malformed 错误
   const handleAvatarUpload = async (event) => {
     const file = event.target.files[0]
     if (!file) return
@@ -81,7 +81,6 @@ const Profile = () => {
 
     // 检查用户ID是否存在
     if (!currentUser?.id) {
-      console.error('❌ 用户ID未定义:', currentUser);
       setError('用户信息不完整，请重新登录')
       return
     }
@@ -100,16 +99,36 @@ const Profile = () => {
       const formData = new FormData()
       formData.append('avatar', file)
 
-      const token = localStorage.getItem('token');
+      // 仔细处理 token - 修复 JWT malformed 错误
+      let token = localStorage.getItem('token');
       
-      console.log('🚀 使用fetch发送上传请求...');
+      if (!token) {
+        setError('请先登录');
+        return;
+      }
 
-      // 使用 fetch，不设置 Content-Type，让浏览器自动处理 boundary
+      // 清理 token - 移除可能的空格、引号和特殊字符
+      token = token.trim().replace(/^"(.*)"$/, '$1').replace(/[\n\r\t]/g, '');
+      
+      // 验证 JWT 格式（应该有3部分）
+      const tokenParts = token.split('.');
+      if (tokenParts.length !== 3) {
+        console.error('❌ JWT 格式错误，应有3部分，实际:', tokenParts.length);
+        setError('认证信息损坏，请重新登录');
+        logout();
+        return;
+      }
+
+      console.log('✅ Token 格式验证通过:', {
+        parts: tokenParts.length,
+        tokenPreview: `${token.substring(0, 20)}...`
+      });
+
       const response = await fetch('/api/users/avatar', {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`
-          // 不要设置 Content-Type，让浏览器自动设置 multipart boundary
+          // 不要设置 Content-Type，让浏览器自动处理 boundary
         },
         body: formData
       });
@@ -121,28 +140,32 @@ const Profile = () => {
 
       if (!response.ok) {
         if (response.status === 401) {
-          setError('登录已过期，请重新登录');
-          logout();
-          setTimeout(() => {
-            navigate('/login');
-          }, 2000);
-        } else if (response.status === 500) {
-          const errorMessage = result?.message || '服务器内部错误';
-          if (errorMessage.includes('Multipart') || errorMessage.includes('Boundary')) {
-            setError('文件上传格式错误，请联系管理员');
-          } else {
-            setError(`服务器错误: ${errorMessage}`);
+          const errorDetail = result?.message || '认证失败';
+          console.error('🔐 401 错误详情:', errorDetail);
+          
+          setError(`上传失败: ${errorDetail}`);
+          
+          // 只在 token 明确有问题时登出
+          if (errorDetail.includes('malformed') || errorDetail.includes('invalid') || errorDetail.includes('expired')) {
+            setTimeout(() => {
+              logout();
+              navigate('/login');
+            }, 3000);
           }
+          return;
         } else if (response.status === 413) {
           setError('文件太大，请选择小于2MB的图片');
         } else if (response.status === 415) {
           setError('不支持的图片格式');
+        } else if (response.status === 500) {
+          setError('服务器内部错误，请稍后重试');
         } else {
-          setError(result?.message || `上传失败: ${response.status}`);
+          setError(`上传失败: ${result?.message || '服务器错误'}`);
         }
         return;
       }
 
+      // 成功处理
       if (result && result.success) {
         console.log('✅ 头像上传成功:', result.avatarUrl);
         
