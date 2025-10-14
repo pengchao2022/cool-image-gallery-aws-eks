@@ -361,7 +361,20 @@ const Profile = () => {
               border: currentUser.avatar ? '3px solid var(--primary)' : 'none',
               overflow: 'hidden',
               position: 'relative',
-              zIndex: 10
+              zIndex: 10,
+              transition: 'all 0.3s ease',
+              transform: showAvatarMenu ? 'scale(1.05)' : 'scale(1)',
+              boxShadow: showAvatarMenu ? '0 4px 12px rgba(0,0,0,0.2)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'scale(1.05)';
+              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              if (!showAvatarMenu) {
+                e.target.style.transform = 'scale(1)';
+                e.target.style.boxShadow = 'none';
+              }
             }}
           >
             {currentUser.avatar ? (
@@ -423,7 +436,8 @@ const Profile = () => {
                 padding: '8px 0',
                 minWidth: '150px',
                 zIndex: 1000,
-                border: '1px solid #eee'
+                border: '1px solid #eee',
+                animation: 'fadeIn 0.2s ease'
               }}>
                 <button
                   onClick={(e) => {
@@ -442,7 +456,8 @@ const Profile = () => {
                     alignItems: 'center',
                     gap: '8px',
                     fontSize: '14px',
-                    color: '#333'
+                    color: '#333',
+                    transition: 'background-color 0.2s ease'
                   }}
                   onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
                   onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
@@ -469,7 +484,8 @@ const Profile = () => {
                       alignItems: 'center',
                       gap: '8px',
                       fontSize: '14px',
-                      color: 'var(--danger)'
+                      color: 'var(--danger)',
+                      transition: 'background-color 0.2s ease'
                     }}
                     onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
@@ -509,7 +525,8 @@ const Profile = () => {
           marginBottom: '20px',
           display: 'flex',
           alignItems: 'center',
-          gap: '10px'
+          gap: '10px',
+          animation: 'fadeIn 0.3s ease'
         }}>
           <i className="fas fa-exclamation-triangle"></i>
           <span>{error}</span>
@@ -555,7 +572,17 @@ const Profile = () => {
                     border: 'none',
                     borderRadius: '5px',
                     cursor: 'pointer',
-                    transition: 'all 0.3s'
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (activeTab !== 'info') {
+                      e.target.style.backgroundColor = '#f8f9fa';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeTab !== 'info') {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
                   }}
                 >
                   <i className="fas fa-user" style={{ marginRight: '10px' }}></i>
@@ -574,7 +601,17 @@ const Profile = () => {
                     border: 'none',
                     borderRadius: '5px',
                     cursor: 'pointer',
-                    transition: 'all 0.3s'
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (activeTab !== 'comics') {
+                      e.target.style.backgroundColor = '#f8f9fa';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeTab !== 'comics') {
+                      e.target.style.backgroundColor = 'transparent';
+                    }
                   }}
                 >
                   <i className="fas fa-book" style={{ marginRight: '10px' }}></i>
@@ -593,8 +630,10 @@ const Profile = () => {
                     border: 'none',
                     borderRadius: '5px',
                     cursor: 'pointer',
-                    transition: 'all 0.3s'
+                    transition: 'all 0.3s ease'
                   }}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = '#ffe6e6'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                 >
                   <i className="fas fa-sign-out-alt" style={{ marginRight: '10px' }}></i>
                   退出登录
@@ -690,6 +729,14 @@ const Profile = () => {
                         background: 'white',
                         boxShadow: '0 3px 10px rgba(0,0,0,0.1)',
                         cursor: 'pointer'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-5px)';
+                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.15)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 3px 10px rgba(0,0,0,0.1)';
                       }}
                     >
                       <img 
