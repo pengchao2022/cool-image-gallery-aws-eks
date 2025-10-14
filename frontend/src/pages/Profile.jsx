@@ -19,54 +19,16 @@ const Profile = () => {
   // 添加调试日志
   console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu, 'currentUser:', currentUser);
 
-  // Token 验证函数
-  const validateToken = async () => {
+  // 简单的 token 检查函数
+  const checkToken = () => {
     const token = localStorage.getItem('token');
-    if (!token) {
-      console.log('🔐 没有找到 token');
-      return false;
-    }
-
-    try {
-      console.log('🔍 验证 token 有效性...');
-      const response = await fetch('/api/auth/verify', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        console.log('✅ Token 有效');
-        return true;
-      } else {
-        console.log('❌ Token 无效，状态码:', response.status);
-        // 清除无效的 token
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        return false;
-      }
-    } catch (error) {
-      console.error('❌ Token 验证请求失败:', error);
-      return false;
-    }
+    console.log('🔍 Token 检查:', {
+      exists: !!token,
+      length: token ? token.length : 0,
+      preview: token ? `${token.substring(0, 20)}...` : 'none'
+    });
+    return token;
   };
-
-  // 组件加载时验证 token
-  useEffect(() => {
-    const checkTokenOnLoad = async () => {
-      const isValid = await validateToken();
-      if (!isValid) {
-        setError('登录已过期，请重新登录');
-        setTimeout(() => {
-          navigate('/login');
-        }, 3000);
-      }
-    };
-
-    checkTokenOnLoad();
-  }, [navigate]);
 
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
@@ -119,26 +81,19 @@ const Profile = () => {
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传 - 完整的 token 验证
+  // 处理头像上传 - 简化版本
   const handleAvatarUpload = async (event) => {
     const file = event.target.files[0]
     if (!file) return
 
-    // 首先验证 token
-    const token = localStorage.getItem('token');
+    // 简单的 token 检查
+    const token = checkToken();
     if (!token) {
       setError('请先登录');
       console.error('❌ Token 不存在');
       setTimeout(() => {
         navigate('/login');
       }, 2000);
-      return;
-    }
-
-    // 验证 token 有效性
-    const isValidToken = await validateToken();
-    if (!isValidToken) {
-      setError('登录已过期，请重新登录');
       return;
     }
 
@@ -169,19 +124,13 @@ const Profile = () => {
         name: file.name,
         type: file.type,
         size: file.size,
-        userId: currentUser.id,
-        tokenExists: !!token,
-        tokenLength: token.length
+        userId: currentUser.id
       });
 
       const formData = new FormData()
       formData.append('avatar', file)
 
-      console.log('🚀 发送上传请求...', {
-        url: '/api/users/avatar',
-        method: 'PUT',
-        tokenPreview: token ? `${token.substring(0, 20)}...` : 'none'
-      });
+      console.log('🚀 发送上传请求...');
 
       const response = await fetch('/api/users/avatar', {
         method: 'PUT',
@@ -250,22 +199,15 @@ const Profile = () => {
     }
   }
 
-  // 移除头像 - 添加 token 验证
+  // 移除头像 - 简化版本
   const handleRemoveAvatar = async () => {
-    // 首先验证 token
-    const token = localStorage.getItem('token');
+    // 简单的 token 检查
+    const token = checkToken();
     if (!token) {
       setError('请先登录');
       setTimeout(() => {
         navigate('/login');
       }, 2000);
-      return;
-    }
-
-    // 验证 token 有效性
-    const isValidToken = await validateToken();
-    if (!isValidToken) {
-      setError('登录已过期，请重新登录');
       return;
     }
 
@@ -334,10 +276,10 @@ const Profile = () => {
     }
   }, [currentUser, activeTab]);
 
-  // 获取用户漫画 - 添加 token 验证
+  // 获取用户漫画
   const fetchUserComics = async () => {
     // 验证 token
-    const token = localStorage.getItem('token');
+    const token = checkToken();
     if (!token) {
       setError('请先登录');
       setTimeout(() => {
@@ -393,9 +335,6 @@ const Profile = () => {
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           setError('登录已过期，请重新登录');
-          setTimeout(() => {
-            navigate('/login');
-          }, 2000);
         } else {
           setError('获取漫画数据失败');
         }
