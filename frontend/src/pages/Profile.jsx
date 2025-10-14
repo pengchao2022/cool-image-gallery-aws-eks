@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect } from 'react'
+import React, { useContext, useState, useEffect, useRef } from 'react'
 import { AuthContext } from '../context/AuthContext.jsx'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api.jsx'
@@ -6,11 +6,14 @@ import '../App.css'
 import './Profile.css'  
 
 const Profile = () => {
-  const { currentUser, logout } = useContext(AuthContext)
+  const { currentUser, logout, updateUser } = useContext(AuthContext)
   const [activeTab, setActiveTab] = useState('info')
   const [userComics, setUserComics] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showAvatarMenu, setShowAvatarMenu] = useState(false)
+  const [avatarLoading, setAvatarLoading] = useState(false)
+  const fileInputRef = useRef(null)
   const navigate = useNavigate()
 
   const formatToBeijingTime = (utcTime) => {
@@ -35,6 +38,119 @@ const Profile = () => {
       return formatToBeijingTime(currentUser.created_at)
     }
     return '暂不可用'
+  }
+
+  // 点击头像显示菜单
+  const handleAvatarClick = () => {
+    setShowAvatarMenu(!showAvatarMenu)
+  }
+
+  // 点击菜单外部关闭菜单
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showAvatarMenu && !event.target.closest('.avatar-container')) {
+        setShowAvatarMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showAvatarMenu])
+
+  // 触发文件选择
+  const handleUploadClick = () => {
+    fileInputRef.current?.click()
+    setShowAvatarMenu(false)
+  }
+
+  // 处理头像上传
+  const handleAvatarUpload = async (event) => {
+    const file = event.target.files[0]
+    if (!file) return
+
+    // 验证文件类型
+    if (!file.type.startsWith('image/')) {
+      setError('请选择图片文件')
+      return
+    }
+
+    // 验证文件大小（限制为2MB）
+    if (file.size > 2 * 1024 * 1024) {
+      setError('图片大小不能超过2MB')
+      return
+    }
+
+    try {
+      setAvatarLoading(true)
+      setError('')
+
+      const formData = new FormData()
+      formData.append('avatar', file)
+
+      const response = await api.put('/users/avatar', formData, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+
+      if (response.data && response.data.success) {
+        // 更新用户信息
+        const updatedUser = { 
+          ...currentUser, 
+          avatar: response.data.avatarUrl 
+        }
+        updateUser(updatedUser)
+        alert('头像更新成功')
+      } else {
+        setError('头像上传失败')
+      }
+    } catch (error) {
+      console.error('头像上传失败:', error)
+      if (error.response && error.response.data) {
+        setError(error.response.data.message || '头像上传失败，请重试')
+      } else {
+        setError('头像上传失败，请重试')
+      }
+    } finally {
+      setAvatarLoading(false)
+      // 清空文件输入
+      event.target.value = ''
+    }
+  }
+
+  // 移除头像
+  const handleRemoveAvatar = async () => {
+    try {
+      setAvatarLoading(true)
+      const response = await api.delete('/users/avatar', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      })
+
+      if (response.data && response.data.success) {
+        // 更新用户信息，移除头像
+        const updatedUser = { ...currentUser }
+        delete updatedUser.avatar
+        updateUser(updatedUser)
+        setShowAvatarMenu(false)
+        alert('头像已移除')
+      } else {
+        setError('移除头像失败')
+      }
+    } catch (error) {
+      console.error('移除头像失败:', error)
+      if (error.response && error.response.data) {
+        setError(error.response.data.message || '移除头像失败，请重试')
+      } else {
+        setError('移除头像失败，请重试')
+      }
+    } finally {
+      setAvatarLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -218,21 +334,145 @@ const Profile = () => {
         borderRadius: '15px',
         boxShadow: '0 5px 15px rgba(0,0,0,0.1)'
       }}>
-        <div className="user-avatar-large" style={{
-          width: '100px',
-          height: '100px',
-          borderRadius: '50%',
-          backgroundColor: 'var(--primary)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'white',
-          fontSize: '2.5rem',
-          fontWeight: 'bold',
-          marginRight: '30px'
-        }}>
-          {currentUser.username?.[0]?.toUpperCase() || 'U'}
+        {/* 头像容器 - 添加点击功能 */}
+        <div className="avatar-container" style={{ position: 'relative', marginRight: '30px' }}>
+          <div 
+            className="user-avatar-large"
+            onClick={handleAvatarClick}
+            style={{
+              width: '100px',
+              height: '100px',
+              borderRadius: '50%',
+              backgroundColor: currentUser.avatar ? 'transparent' : 'var(--primary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              fontSize: '2.5rem',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              border: currentUser.avatar ? '3px solid var(--primary)' : 'none',
+              overflow: 'hidden',
+              position: 'relative'
+            }}
+          >
+            {currentUser.avatar ? (
+              <img 
+                src={currentUser.avatar} 
+                alt="用户头像" 
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover'
+                }}
+                onError={(e) => {
+                  e.target.style.display = 'none'
+                }}
+              />
+            ) : null}
+            {!currentUser.avatar && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '100%',
+                height: '100%'
+              }}>
+                {currentUser.username?.[0]?.toUpperCase() || 'U'}
+              </div>
+            )}
+            
+            {/* 加载指示器 */}
+            {avatarLoading && (
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '50%'
+              }}>
+                <i className="fas fa-spinner fa-spin" style={{ color: 'white', fontSize: '1.5rem' }}></i>
+              </div>
+            )}
+          </div>
+
+          {/* 头像菜单 */}
+          {showAvatarMenu && (
+            <div style={{
+              position: 'absolute',
+              top: '110%',
+              left: 0,
+              backgroundColor: 'white',
+              borderRadius: '8px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              padding: '8px 0',
+              minWidth: '150px',
+              zIndex: 1000,
+              border: '1px solid #eee'
+            }}>
+              <button
+                onClick={handleUploadClick}
+                style={{
+                  width: '100%',
+                  padding: '10px 16px',
+                  textAlign: 'left',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '14px',
+                  color: '#333'
+                }}
+                onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+              >
+                <i className="fas fa-upload"></i>
+                上传头像
+              </button>
+              
+              {currentUser.avatar && (
+                <button
+                  onClick={handleRemoveAvatar}
+                  style={{
+                    width: '100%',
+                    padding: '10px 16px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '14px',
+                    color: 'var(--danger)'
+                  }}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                >
+                  <i className="fas fa-trash"></i>
+                  移除头像
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 隐藏的文件输入 */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleAvatarUpload}
+            accept="image/*"
+            style={{ display: 'none' }}
+          />
         </div>
+
         <div>
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
           <p style={{ color: '#666', marginBottom: '5px' }}>邮箱: {currentUser.email}</p>
@@ -240,11 +480,41 @@ const Profile = () => {
         </div>
       </div>
 
+      {/* 错误提示 */}
+      {error && (
+        <div style={{ 
+          background: '#ffe6e6', 
+          color: '#d63031', 
+          padding: '15px', 
+          borderRadius: '8px', 
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <i className="fas fa-exclamation-triangle"></i>
+          <span>{error}</span>
+          <button 
+            onClick={() => setError('')}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: '#d63031', 
+              cursor: 'pointer',
+              marginLeft: 'auto'
+            }}
+          >
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+      )}
+
       <div className="profile-content" style={{
         display: 'grid',
         gridTemplateColumns: '250px 1fr',
         gap: '30px'
       }}>
+        {/* 侧边栏导航 */}
         <div className="profile-sidebar" style={{
           background: 'white',
           borderRadius: '10px',
@@ -315,6 +585,7 @@ const Profile = () => {
           </nav>
         </div>
 
+        {/* 主要内容区域 */}
         <div className="profile-main" style={{
           background: 'white',
           borderRadius: '10px',
@@ -361,22 +632,6 @@ const Profile = () => {
                   上传新漫画
                 </button>
               </div>
-              
-              {error && (
-                <div style={{ 
-                  background: '#ffe6e6', 
-                  color: '#d63031', 
-                  padding: '15px', 
-                  borderRadius: '8px', 
-                  marginBottom: '20px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px'
-                }}>
-                  <i className="fas fa-exclamation-triangle"></i>
-                  <span>{error}</span>
-                </div>
-              )}
               
               {loading ? (
                 <div style={{ textAlign: 'center', padding: '40px' }}>
