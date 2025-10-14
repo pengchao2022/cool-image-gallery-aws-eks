@@ -43,6 +43,19 @@ const Browse = () => {
     }
   }
 
+  // 处理卡片点击 - 跳转到漫画详情页
+  const handleCardClick = (comicId) => {
+    console.log(`🖱️ 点击漫画卡片ID: ${comicId}`)
+    navigate(`/comic/${comicId}`)
+  }
+
+  // 处理图片点击 - 跳转到漫画详情页
+  const handleImageClick = (comicId, e) => {
+    e.stopPropagation() // 防止事件冒泡
+    console.log(`🖱️ 点击漫画图片ID: ${comicId}`)
+    navigate(`/comic/${comicId}`)
+  }
+
   // 处理图片加载失败
   const handleImageError = (e, comic) => {
     console.log(`❌ 图片加载失败: ${comic.title}`, e.target.src)
@@ -126,13 +139,20 @@ const Browse = () => {
         ) : (
           <div className="comic-grid">
             {comics.map(comic => (
-              <div key={comic.id} className="comic-card">
+              <div 
+                key={comic.id} 
+                className="comic-card"
+                onClick={() => handleCardClick(comic.id)}
+                style={{ cursor: 'pointer' }} // 添加指针光标
+              >
                 <img 
                   src={comic.image_urls && comic.image_urls[0]} 
                   alt={comic.title} 
                   className="comic-image"
                   onError={(e) => handleImageError(e, comic)}
                   onLoad={(e) => handleImageLoad(e, comic)}
+                  onClick={(e) => handleImageClick(comic.id, e)}
+                  style={{ cursor: 'pointer' }} // 图片也添加指针光标
                 />
                 <div className="comic-info">
                   <div className="comic-title">{comic.title}</div>
