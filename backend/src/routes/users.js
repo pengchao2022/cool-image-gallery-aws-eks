@@ -28,6 +28,10 @@ router.put('/profile', verifyToken, async (req, res) => {
 // 更新用户头像
 router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => {
     try {
+        console.log('🔍 ========== 头像上传路由调试开始 ==========');
+        console.log('🔍 req.user:', req.user);
+        console.log('🔍 req.user.id:', req.user?.id);
+        
         if (!req.file) {
             return res.status(400).json({
                 success: false,
@@ -35,7 +39,8 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
             });
         }
 
-        const userId = req.user.id;
+        // 关键修复：使用正确的用户ID字段
+        const userId = req.user?.id;
         
         console.log('🔄 开始上传头像，用户ID:', userId);
         console.log('📁 文件信息:', {
@@ -43,6 +48,15 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
             mimetype: req.file.mimetype,
             size: req.file.size
         });
+
+        // 检查用户ID是否存在
+        if (!userId) {
+            console.error('❌ 用户ID未定义，req.user:', req.user);
+            return res.status(401).json({
+                success: false,
+                message: '用户认证信息不完整'
+            });
+        }
 
         // 检查文件类型
         if (!req.file.mimetype.startsWith('image/')) {
@@ -61,12 +75,14 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
         }
 
         // 获取用户当前的头像信息
+        console.log('💾 查询数据库用户信息...');
         const userResult = await query(
             'SELECT avatar FROM users WHERE id = $1',
             [userId]
         );
 
         if (userResult.rows.length === 0) {
+            console.error('❌ 数据库中没有找到用户，ID:', userId);
             return res.status(404).json({
                 success: false,
                 message: '用户不存在'
