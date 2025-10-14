@@ -19,17 +19,6 @@ const Profile = () => {
   // 添加调试日志
   console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu, 'currentUser:', currentUser);
 
-  // 简单的 token 检查函数
-  const checkToken = () => {
-    const token = localStorage.getItem('token');
-    console.log('🔍 Token 检查:', {
-      exists: !!token,
-      length: token ? token.length : 0,
-      preview: token ? `${token.substring(0, 20)}...` : 'none'
-    });
-    return token;
-  };
-
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
     
@@ -54,13 +43,6 @@ const Profile = () => {
     return '暂不可用'
   }
 
-  // 重新登录函数
-  const handleReLogin = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/login');
-  };
-
   // 点击菜单外部关闭菜单
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -81,21 +63,10 @@ const Profile = () => {
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传 - 简化版本
+  // 处理头像上传 - 修复 boundary 错误和用户ID问题
   const handleAvatarUpload = async (event) => {
     const file = event.target.files[0]
     if (!file) return
-
-    // 简单的 token 检查
-    const token = checkToken();
-    if (!token) {
-      setError('请先登录');
-      console.error('❌ Token 不存在');
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
-      return;
-    }
 
     // 验证文件类型
     if (!file.type.startsWith('image/')) {
@@ -109,7 +80,7 @@ const Profile = () => {
       return
     }
 
-    // 检查用户ID是否存在
+    // 检查用户ID是否存在 - 关键修复
     if (!currentUser?.id) {
       console.error('❌ 用户ID未定义:', currentUser);
       setError('用户信息不完整，请重新登录')
@@ -124,179 +95,140 @@ const Profile = () => {
         name: file.name,
         type: file.type,
         size: file.size,
-        userId: currentUser.id
+        userId: currentUser.id // 添加用户ID日志
       });
 
       const formData = new FormData()
       formData.append('avatar', file)
+      // 可选：添加用户ID到formData，确保后端能获取到
+      formData.append('userId', currentUser.id.toString())
 
-      console.log('🚀 发送上传请求...');
-
-      const response = await fetch('/api/users/avatar', {
-        method: 'PUT',
+      // 关键修复：移除 Content-Type，让浏览器自动处理 multipart boundary
+      const response = await api.put('/users/avatar', formData, {
         headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-
-      console.log('📥 收到响应，状态:', response.status);
-      
-      // 解析响应数据
-      const result = await response.json();
-      console.log('📊 响应数据:', result);
-
-      if (!response.ok) {
-        // 如果是 401 错误，清除 token 并重新登录
-        if (response.status === 401) {
-          console.error('❌ Token 无效，清除本地存储');
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setError('登录已过期，请重新登录');
-          return;
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          // 移除 'Content-Type': 'multipart/form-data' - 让浏览器自动设置
         }
-        throw new Error(result.message || `HTTP error! status: ${response.status}`);
-      }
+      })
 
-      // 关键修复：检查响应结构
-      if (result && result.success) {
-        console.log('✅ 头像上传成功:', result.avatarUrl);
-        
+      console.log('✅ 上传响应:', response.data);
+
+      if (response.data && response.data.success) {
         // 更新用户信息
         const updatedUser = { 
           ...currentUser, 
-          avatar: result.avatarUrl 
-        };
-        updateUser(updatedUser);
-        
-        // 更新本地存储的用户信息
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          const userData = JSON.parse(storedUser);
-          userData.avatar = result.avatarUrl;
-          localStorage.setItem('user', JSON.stringify(userData));
+          avatar: response.data.avatarUrl 
         }
-        
-        alert('头像更新成功！');
+        updateUser(updatedUser)
+        alert('头像更新成功！')
       } else {
-        const errorMsg = result.message || '头像上传失败：服务器返回错误';
-        console.error('❌ 服务器返回错误:', result);
-        setError(errorMsg);
+        setError('头像上传失败：服务器返回错误')
       }
     } catch (error) {
       console.error('❌ 头像上传失败:', error);
       
       // 更详细的错误处理
-      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-        setError('网络连接失败，请检查网络设置');
+      if (error.code === 'ECONNABORTED') {
+        setError('上传超时，请检查网络连接')
+      } else if (error.response) {
+        // 服务器响应了错误状态码
+        const status = error.response.status;
+        if (status === 502) {
+          setError('服务器暂时不可用，请稍后重试 (502 Bad Gateway)')
+        } else if (status === 413) {
+          setError('文件太大，请选择小于2MB的图片')
+        } else if (status === 415) {
+          setError('不支持的图片格式')
+        } else if (status === 500) {
+          // 处理数据库错误
+          if (error.response.data?.message?.includes('parameter $1') || 
+              error.response.data?.message?.includes('SequelizeDatabaseError')) {
+            setError('服务器数据库错误，请联系管理员')
+          } else {
+            setError('服务器内部错误，请稍后重试')
+          }
+        } else if (status >= 500) {
+          setError('服务器内部错误，请稍后重试')
+        } else {
+          setError(`上传失败: ${error.response.data?.message || '未知错误'}`)
+        }
+      } else if (error.request) {
+        // 请求发送了但没有收到响应
+        setError('网络连接失败，请检查网络设置')
       } else {
-        setError(`上传失败: ${error.message || '请重试'}`);
+        // 其他错误
+        setError('上传失败，请重试')
       }
     } finally {
-      setAvatarLoading(false);
+      setAvatarLoading(false)
       // 清空文件输入
-      event.target.value = '';
+      event.target.value = ''
     }
   }
 
-  // 移除头像 - 简化版本
+  // 移除头像 - 添加用户ID检查
   const handleRemoveAvatar = async () => {
-    // 简单的 token 检查
-    const token = checkToken();
-    if (!token) {
-      setError('请先登录');
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
-      return;
-    }
-
     // 检查用户ID是否存在
     if (!currentUser?.id) {
-      setError('用户信息不完整，请重新登录');
-      return;
+      setError('用户信息不完整，请重新登录')
+      return
     }
 
     try {
-      setAvatarLoading(true);
-      
-      console.log('🗑️ 开始移除头像，用户ID:', currentUser.id);
-      
-      const response = await fetch('/api/users/avatar', {
-        method: 'DELETE',
+      setAvatarLoading(true)
+      const response = await api.delete('/users/avatar', {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
-      });
+      })
 
-      const result = await response.json();
-      console.log('🗑️ 移除头像响应:', result);
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setError('登录已过期，请重新登录');
-          return;
-        }
-        throw new Error(result.message || `HTTP error! status: ${response.status}`);
-      }
-
-      if (result && result.success) {
+      if (response.data && response.data.success) {
         // 更新用户信息，移除头像
-        const updatedUser = { ...currentUser };
-        delete updatedUser.avatar;
-        updateUser(updatedUser);
-        
-        // 更新本地存储
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          const userData = JSON.parse(storedUser);
-          delete userData.avatar;
-          localStorage.setItem('user', JSON.stringify(userData));
-        }
-        
-        setShowAvatarMenu(false);
-        alert('头像已移除');
+        const updatedUser = { ...currentUser }
+        delete updatedUser.avatar
+        updateUser(updatedUser)
+        setShowAvatarMenu(false)
+        alert('头像已移除')
       } else {
-        setError(result.message || '移除头像失败');
+        setError('移除头像失败')
       }
     } catch (error) {
-      console.error('移除头像失败:', error);
-      setError(error.message || '移除头像失败，请重试');
+      console.error('移除头像失败:', error)
+      if (error.response && error.response.data) {
+        setError(error.response.data.message || '移除头像失败，请重试')
+      } else {
+        setError('移除头像失败，请重试')
+      }
     } finally {
-      setAvatarLoading(false);
+      setAvatarLoading(false)
     }
   }
 
   useEffect(() => {
     if (currentUser && activeTab === 'comics') {
-      fetchUserComics();
+      fetchUserComics()
     }
-  }, [currentUser, activeTab]);
+  }, [currentUser, activeTab])
 
-  // 获取用户漫画
+  const handleCardClick = (comicId) => {
+    navigate(`/comic/${comicId}`)
+  }
+
+  const handleImageClick = (comicId, e) => {
+    e.stopPropagation()
+    navigate(`/comic/${comicId}`)
+  }
+
   const fetchUserComics = async () => {
-    // 验证 token
-    const token = checkToken();
-    if (!token) {
-      setError('请先登录');
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
-      return;
-    }
-
     try {
-      setLoading(true);
-      setError('');
+      setLoading(true)
+      setError('')
       
       const response = await api.get('/comics', {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
-      });
+      })
       
       let responseData = response;
       
@@ -305,57 +237,44 @@ const Profile = () => {
       }
       
       if (responseData) {
-        let allComics = [];
+        let allComics = []
         
         if (responseData.comics && Array.isArray(responseData.comics)) {
-          allComics = responseData.comics;
+          allComics = responseData.comics
         } else if (responseData.data && Array.isArray(responseData.data)) {
-          allComics = responseData.data;
+          allComics = responseData.data
         } else if (Array.isArray(responseData)) {
-          allComics = responseData;
+          allComics = responseData
         } else {
-          allComics = [];
+          allComics = []
         }
         
         const myComics = allComics.filter(comic => (
           comic.user_id === currentUser.id || 
           comic.author_id === currentUser.id ||
           comic.author === currentUser.username
-        ));
+        ))
         
-        setUserComics(myComics);
+        setUserComics(myComics)
       } else {
-        setError('获取漫画数据失败：响应数据为空');
-        setUserComics([]);
+        setError('获取漫画数据失败：响应数据为空')
+        setUserComics([])
       }
     } catch (error) {
       if (error.response) {
         if (error.response.status === 401) {
-          // Token 无效，清除并重新登录
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setError('登录已过期，请重新登录');
-        } else {
-          setError('获取漫画数据失败');
+          logout()
+          navigate('/login')
         }
       } else if (error.request) {
-        setError('获取漫画数据失败，请检查网络连接');
+        setError('获取漫画数据失败，请检查网络连接')
       } else {
-        setError('获取漫画数据失败');
+        setError('获取漫画数据失败')
       }
-      setUserComics([]);
+      setUserComics([])
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }
-
-  const handleCardClick = (comicId) => {
-    navigate(`/comic/${comicId}`);
-  }
-
-  const handleImageClick = (comicId, e) => {
-    e.stopPropagation();
-    navigate(`/comic/${comicId}`);
   }
 
   const getImageUrl = (comic) => {
@@ -408,7 +327,7 @@ const Profile = () => {
 
   const handleDeleteComic = async (comicId) => {
     if (!window.confirm('确定要删除这个漫画吗？此操作不可恢复。')) {
-      return;
+      return
     }
 
     try {
@@ -416,26 +335,26 @@ const Profile = () => {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
-      });
+      })
 
       if (response && response.success) {
-        setUserComics(prev => prev.filter(comic => comic.id !== comicId));
-        alert('漫画删除成功');
+        setUserComics(prev => prev.filter(comic => comic.id !== comicId))
+        alert('漫画删除成功')
       } else {
-        alert('删除失败，请重试');
+        alert('删除失败，请重试')
       }
     } catch (error) {
-      alert('删除失败，请检查网络连接');
+      alert('删除失败，请检查网络连接')
     }
   }
 
   const handleEditComic = (comicId) => {
-    navigate(`/edit-comic/${comicId}`);
+    navigate(`/edit-comic/${comicId}`)
   }
 
   const handleLogout = () => {
-    logout();
-    navigate('/', { replace: true });
+    logout()
+    navigate('/', { replace: true })
   }
 
   if (!currentUser) {
@@ -450,10 +369,10 @@ const Profile = () => {
           返回首页
         </button>
       </div>
-    );
+    )
   }
 
-  const registrationDate = getRegistrationDate();
+  const registrationDate = getRegistrationDate()
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -466,7 +385,7 @@ const Profile = () => {
         borderRadius: '15px',
         boxShadow: '0 5px 15px rgba(0,0,0,0.1)'
       }}>
-        {/* 头像容器 */}
+        {/* 头像容器 - 添加点击功能 */}
         <div className="avatar-container" style={{ position: 'relative', marginRight: '30px' }}>
           <div 
             className="user-avatar-large"
@@ -521,7 +440,7 @@ const Profile = () => {
                   objectFit: 'cover'
                 }}
                 onError={(e) => {
-                  e.target.style.display = 'none';
+                  e.target.style.display = 'none'
                 }}
               />
             ) : null}
@@ -556,54 +475,28 @@ const Profile = () => {
             )}
           </div>
 
-          {/* 头像菜单 */}
-          {showAvatarMenu && (
-            <div style={{
-              position: 'absolute',
-              top: '110%',
-              left: 0,
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-              padding: '8px 0',
-              minWidth: '150px',
-              zIndex: 1000,
-              border: '1px solid #eee',
-              animation: 'fadeIn 0.2s ease'
-            }}>
-              <button
-                onClick={(e) => {
-                  console.log('📤 点击上传头像');
-                  e.stopPropagation();
-                  handleUploadClick();
-                }}
-                style={{
-                  width: '100%',
-                  padding: '10px 16px',
-                  textAlign: 'left',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '14px',
-                  color: '#333',
-                  transition: 'background-color 0.2s ease'
-                }}
-                onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-              >
-                <i className="fas fa-upload"></i>
-                上传头像
-              </button>
-              
-              {currentUser.avatar && (
+          {/* 头像菜单 - 添加调试信息 */}
+          {(() => {
+            console.log('🔄 检查菜单渲染，showAvatarMenu:', showAvatarMenu);
+            return showAvatarMenu && (
+              <div style={{
+                position: 'absolute',
+                top: '110%',
+                left: 0,
+                backgroundColor: 'white',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                padding: '8px 0',
+                minWidth: '150px',
+                zIndex: 1000,
+                border: '1px solid #eee',
+                animation: 'fadeIn 0.2s ease'
+              }}>
                 <button
                   onClick={(e) => {
-                    console.log('🗑️ 点击移除头像');
+                    console.log('📤 点击上传头像');
                     e.stopPropagation();
-                    handleRemoveAvatar();
+                    handleUploadClick();
                   }}
                   style={{
                     width: '100%',
@@ -616,18 +509,47 @@ const Profile = () => {
                     alignItems: 'center',
                     gap: '8px',
                     fontSize: '14px',
-                    color: 'var(--danger)',
+                    color: '#333',
                     transition: 'background-color 0.2s ease'
                   }}
                   onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
                   onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                 >
-                  <i className="fas fa-trash"></i>
-                  移除头像
+                  <i className="fas fa-upload"></i>
+                  上传头像
                 </button>
-              )}
-            </div>
-          )}
+                
+                {currentUser.avatar && (
+                  <button
+                    onClick={(e) => {
+                      console.log('🗑️ 点击移除头像');
+                      e.stopPropagation();
+                      handleRemoveAvatar();
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 16px',
+                      textAlign: 'left',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '14px',
+                      color: 'var(--danger)',
+                      transition: 'background-color 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f8f9fa'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                  >
+                    <i className="fas fa-trash"></i>
+                    移除头像
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 隐藏的文件输入 */}
           <input
@@ -651,8 +573,8 @@ const Profile = () => {
       {/* 错误提示和加载状态 */}
       {error && (
         <div style={{ 
-          background: error.includes('登录') ? '#fff3cd' : '#ffe6e6', 
-          color: error.includes('登录') ? '#856404' : '#d63031', 
+          background: '#ffe6e6', 
+          color: '#d63031', 
           padding: '15px', 
           borderRadius: '8px', 
           marginBottom: '20px',
@@ -661,38 +583,20 @@ const Profile = () => {
           gap: '10px',
           animation: 'fadeIn 0.3s ease'
         }}>
-          <i className={`fas ${error.includes('登录') ? 'fa-exclamation-triangle' : 'fa-exclamation-circle'}`}></i>
+          <i className="fas fa-exclamation-triangle"></i>
           <span>{error}</span>
-          {error.includes('登录') && (
-            <button 
-              onClick={handleReLogin}
-              style={{ 
-                background: 'var(--primary)', 
-                color: 'white',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                marginLeft: 'auto'
-              }}
-            >
-              重新登录
-            </button>
-          )}
-          {!error.includes('登录') && (
-            <button 
-              onClick={() => setError('')}
-              style={{ 
-                background: 'none', 
-                border: 'none', 
-                color: error.includes('登录') ? '#856404' : '#d63031', 
-                cursor: 'pointer',
-                marginLeft: 'auto'
-              }}
-            >
-              <i className="fas fa-times"></i>
-            </button>
-          )}
+          <button 
+            onClick={() => setError('')}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: '#d63031', 
+              cursor: 'pointer',
+              marginLeft: 'auto'
+            }}
+          >
+            <i className="fas fa-times"></i>
+          </button>
         </div>
       )}
 
@@ -974,7 +878,7 @@ const Profile = () => {
         </div>
       </div>
     </div>
-  );
+  )
 }
 
-export default Profile;
+export default Profile
