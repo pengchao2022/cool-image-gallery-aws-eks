@@ -63,7 +63,7 @@ const Profile = () => {
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传 - 修复版本：使用 api 服务而不是直接 fetch
+  // 处理头像上传 - 修复版本
   const handleAvatarUpload = async (event) => {
     console.log('📁 文件选择变化:', event.target.files);
     
@@ -107,23 +107,21 @@ const Profile = () => {
       formData.append('avatar', file)
 
       console.log('✅ Token 格式验证通过，准备上传...');
-      console.log('🚀 使用 api 服务发送上传请求到 /users/avatar');
+      console.log('🚀 使用专用头像上传方法');
 
-      // 🔥 关键修改：移除 Content-Type 头，让浏览器自动设置
-      const response = await api.put('/users/avatar', formData);
-      // 注意：不要设置 headers，让浏览器自动处理 multipart/form-data
+      // 使用新的专用方法
+      const result = await api.users.uploadAvatar(formData);
 
-      console.log('📡 收到响应，状态:', response.status);
-      console.log('📊 响应数据:', response.data);
-
-      // 成功处理
-      if (response.data && response.data.success) {
-        console.log('✅ 头像上传成功:', response.data.avatarUrl);
+      console.log('📡 收到完整响应:', result);
+      
+      // 🔥 关键修改：直接使用 result，不需要 result.data
+      if (result && result.success) {
+        console.log('✅ 头像上传成功:', result.avatarUrl);
         
         // 更新用户信息
         const updatedUser = { 
           ...currentUser, 
-          avatar: response.data.avatarUrl 
+          avatar: result.avatarUrl 
         };
         updateUser(updatedUser);
         
@@ -131,53 +129,40 @@ const Profile = () => {
         const storedUser = localStorage.getItem('user');
         if (storedUser) {
           const userData = JSON.parse(storedUser);
-          userData.avatar = response.data.avatarUrl;
+          userData.avatar = result.avatarUrl;
           localStorage.setItem('user', JSON.stringify(userData));
         }
         
         alert('头像更新成功！');
       } else {
-        setError(response.data?.message || '头像上传失败：服务器返回错误');
+        console.error('❌ 响应格式不正确:', result);
+        setError(result?.message || '头像上传失败：服务器返回错误格式');
       }
     } catch (error) {
       console.error('❌ 头像上传失败:', error);
       
       // 处理错误响应
-      if (error.response) {
-        const status = error.response.status;
-        const errorData = error.response.data;
+      if (error.status === 401) {
+        const errorDetail = error.data?.message || '认证失败';
+        console.error('🔐 401 错误详情:', errorDetail);
         
-        console.log('📊 错误响应详情:', {
-          status: status,
-          data: errorData
-        });
-
-        if (status === 401) {
-          const errorDetail = errorData?.message || '认证失败';
-          console.error('🔐 401 错误详情:', errorDetail);
-          
-          setError(`上传失败: ${errorDetail}`);
-          
-          // 只在 token 明确有问题时登出
-          if (errorDetail.includes('malformed') || errorDetail.includes('invalid') || errorDetail.includes('expired')) {
-            setTimeout(() => {
-              logout();
-              navigate('/login');
-            }, 3000);
-          }
-        } else if (status === 413) {
-          setError('文件太大，请选择小于2MB的图片');
-        } else if (status === 415) {
-          setError('不支持的图片格式');
-        } else if (status === 500) {
-          setError('服务器内部错误，请稍后重试');
-        } else {
-          setError(`上传失败: ${errorData?.message || `服务器错误 (${status})`}`);
+        setError(`上传失败: ${errorDetail}`);
+        
+        // 只在 token 明确有问题时登出
+        if (errorDetail.includes('malformed') || errorDetail.includes('invalid') || errorDetail.includes('expired')) {
+          setTimeout(() => {
+            logout();
+            navigate('/login');
+          }, 3000);
         }
-      } else if (error.request) {
-        setError('网络连接失败，请检查网络设置');
+      } else if (error.status === 413) {
+        setError('文件太大，请选择小于2MB的图片');
+      } else if (error.status === 415) {
+        setError('不支持的图片格式');
+      } else if (error.status === 500) {
+        setError('服务器内部错误，请稍后重试');
       } else {
-        setError(`上传失败: ${error.message || '请重试'}`);
+        setError(error.message || `上传失败 (${error.status})`);
       }
     } finally {
       setAvatarLoading(false);
@@ -198,11 +183,12 @@ const Profile = () => {
       
       console.log('🗑️ 开始移除头像，用户ID:', currentUser.id);
       
-      const response = await api.delete('/users/avatar');
+      const result = await api.users.deleteAvatar();
 
-      console.log('🗑️ 移除头像响应:', response.data);
+      console.log('🗑️ 移除头像响应:', result);
 
-      if (response.data && response.data.success) {
+      // 🔥 修改：直接使用 result，不需要 result.data
+      if (result && result.success) {
         // 更新用户信息，移除头像
         const updatedUser = { ...currentUser };
         delete updatedUser.avatar;
