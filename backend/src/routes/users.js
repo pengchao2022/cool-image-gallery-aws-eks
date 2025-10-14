@@ -3,8 +3,6 @@ import { query } from '../config/database.js';
 import { verifyToken, getProfile } from '../controllers/authController.js';
 import { upload } from '../middleware/upload.js';
 import { uploadToS3, deleteFromS3 } from '../utils/s3.js';
-// 导入 Sequelize 模型
-import { User } from '../models/index.js'; // 根据你的项目结构调整这个路径
 
 const router = express.Router();
 
@@ -33,7 +31,6 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
         console.log('🔍 ========== 头像上传路由调试开始 ==========');
         console.log('🔍 req.user:', req.user);
         console.log('🔍 req.user.userId:', req.user?.userId);
-        console.log('🔍 req.user.id:', req.user?.id);
         
         if (!req.file) {
             return res.status(400).json({
@@ -75,13 +72,16 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
             });
         }
 
-        // 获取用户当前的头像信息 - 使用 Sequelize
+        // 获取用户当前的头像信息 - 使用原生查询
         console.log('💾 查询数据库用户信息...');
-        const user = await User.findByPk(userId, {
-            attributes: ['avatar']
-        });
+        const userResult = await query(
+            'SELECT avatar FROM users WHERE id = ?',  // 使用 ? 作为占位符
+            [userId]  // 参数数组
+        );
 
-        if (!user) {
+        console.log('📊 用户查询结果:', userResult);
+
+        if (!userResult || userResult.length === 0) {
             console.error('❌ 数据库中没有找到用户，ID:', userId);
             return res.status(404).json({
                 success: false,
@@ -89,24 +89,21 @@ router.put('/avatar', verifyToken, upload.single('avatar'), async (req, res) => 
             });
         }
 
-        const oldAvatarUrl = user.avatar;
+        const oldAvatarUrl = userResult[0].avatar;
 
         // 上传到 S3
         console.log('☁️ 上传头像到S3...');
         const avatarUrl = await uploadToS3(req.file, 'avatars', userId);
         console.log('✅ S3上传成功，URL:', avatarUrl);
 
-        // 更新数据库中的头像URL - 使用 Sequelize
+        // 更新数据库中的头像URL
         console.log('💾 更新数据库头像信息...');
-        await User.update(
-            { 
-                avatar: avatarUrl,
-                updated_at: new Date()
-            },
-            { 
-                where: { id: userId } 
-            }
+        const updateResult = await query(
+            'UPDATE users SET avatar = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [avatarUrl, userId]
         );
+
+        console.log('📊 更新结果:', updateResult);
 
         // 如果存在旧头像，从S3删除
         if (oldAvatarUrl) {
@@ -142,19 +139,20 @@ router.delete('/avatar', verifyToken, async (req, res) => {
         
         console.log('🗑️ 开始删除头像，用户ID:', userId);
 
-        // 获取用户当前的头像信息 - 使用 Sequelize
-        const user = await User.findByPk(userId, {
-            attributes: ['avatar']
-        });
+        // 获取用户当前的头像信息
+        const userResult = await query(
+            'SELECT avatar FROM users WHERE id = ?',
+            [userId]
+        );
 
-        if (!user) {
+        if (!userResult || userResult.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: '用户不存在'
             });
         }
 
-        const avatarUrl = user.avatar;
+        const avatarUrl = userResult[0].avatar;
         
         if (!avatarUrl) {
             return res.status(400).json({
@@ -172,16 +170,11 @@ router.delete('/avatar', verifyToken, async (req, res) => {
             // 继续执行，不中断
         }
 
-        // 更新数据库，移除头像 - 使用 Sequelize
+        // 更新数据库，移除头像
         console.log('💾 更新数据库，移除头像字段...');
-        await User.update(
-            { 
-                avatar: null,
-                updated_at: new Date()
-            },
-            { 
-                where: { id: userId } 
-            }
+        await query(
+            'UPDATE users SET avatar = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [userId]
         );
 
         console.log('✅ 头像删除完成');
@@ -219,19 +212,19 @@ router.get('/registration-date/:userId', verifyToken, async (req, res) => {
         
         console.log('🔍 查询用户注册时间，用户ID:', userId);
         
-        // 使用 Sequelize 查询
-        const user = await User.findByPk(userId, {
-            attributes: ['id', 'username', 'created_at']
-        });
+        const result = await query(
+            'SELECT id, username, created_at FROM users WHERE id = ?',
+            [userId]
+        );
         
-        console.log('📊 查询结果:', user);
+        console.log('📊 查询结果:', result);
         
-        if (user) {
+        if (result && result.length > 0) {
             res.json({ 
                 success: true,
-                user_id: user.id,
-                username: user.username,
-                created_at: user.created_at 
+                user_id: result[0].id,
+                username: result[0].username,
+                created_at: result[0].created_at 
             });
         } else {
             res.status(404).json({ 
@@ -255,17 +248,17 @@ router.get('/:id', verifyToken, async (req, res) => {
         
         console.log('🔍 获取用户详情，用户ID:', id);
         
-        // 使用 Sequelize 查询
-        const user = await User.findByPk(id, {
-            attributes: ['id', 'username', 'email', 'created_at', 'avatar']
-        });
+        const result = await query(
+            'SELECT id, username, email, created_at, avatar FROM users WHERE id = ?',
+            [id]
+        );
         
-        console.log('📊 用户详情结果:', user);
+        console.log('📊 用户详情结果:', result);
         
-        if (user) {
+        if (result && result.length > 0) {
             res.json({ 
                 success: true,
-                user: user
+                user: result[0]
             });
         } else {
             res.status(404).json({ 
