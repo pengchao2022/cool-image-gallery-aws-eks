@@ -18,7 +18,32 @@ const Profile = () => {
 
   console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu, 'currentUser:', currentUser);
 
-  // 处理头像上传 - 修复版本
+  // 添加缺失的函数
+  const formatToBeijingTime = (utcTime) => {
+    if (!utcTime) return '未知时间'
+    
+    try {
+      const date = new Date(utcTime)
+      
+      if (isNaN(date.getTime())) {
+        return '无效时间格式'
+      }
+      
+      const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
+      return beijingTime.toISOString().split('T')[0]
+    } catch (error) {
+      return '时间转换错误'
+    }
+  }
+
+  const getRegistrationDate = () => {
+    if (currentUser?.created_at) {
+      return formatToBeijingTime(currentUser.created_at)
+    }
+    return '暂不可用'
+  }
+
+  // 处理头像上传 - 简化版本
   const handleAvatarUpload = async (event) => {
     const file = event.target.files[0]
     if (!file) return
@@ -58,104 +83,54 @@ const Profile = () => {
 
       console.log('🚀 使用api.put发送上传请求...');
 
-      // 使用 fetch 而不是 api.put，以便更好地控制请求
-      const token = localStorage.getItem('token');
-      console.log('🔑 使用的Token:', token ? '存在' : '不存在');
-      if (token) {
-        console.log('🔑 Token内容:', token.substring(0, 20) + '...');
-      }
-
-      const response = await fetch('/api/users/avatar', {
-        method: 'PUT',
+      // 使用 api.put
+      const response = await api.put('/users/avatar', formData, {
         headers: {
-          'Authorization': `Bearer ${token}`
-          // 不要设置 Content-Type，让浏览器自动设置 multipart boundary
-        },
-        body: formData
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
-      console.log('📡 响应状态:', response.status);
-      console.log('📡 响应头:', Object.fromEntries(response.headers.entries()));
+      console.log('✅ 上传响应:', response.data);
 
-      // 检查响应内容类型
-      const contentType = response.headers.get('content-type');
-      let result;
-
-      if (contentType && contentType.includes('application/json')) {
-        result = await response.json();
-        console.log('📊 JSON响应数据:', result);
-      } else {
-        const text = await response.text();
-        console.log('📝 文本响应:', text);
-        try {
-          result = JSON.parse(text);
-          console.log('✅ 解析后的JSON:', result);
-        } catch (parseError) {
-          console.error('❌ 响应不是有效的JSON:', text);
-          result = { message: text };
-        }
-      }
-
-      if (!response.ok) {
-        console.error('❌ 错误详情:', {
-          status: response.status,
-          statusText: response.statusText,
-          data: result
-        });
-
-        if (response.status === 500) {
-          // 服务器内部错误
-          const errorMessage = result?.message || result?.error || '服务器内部错误，请联系管理员';
-          setError(`服务器错误: ${errorMessage}`);
-          
-          // 显示详细的错误信息用于调试
-          console.error('🔧 500错误详细信息:', {
-            userId: currentUser.id,
-            fileInfo: {
-              name: file.name,
-              type: file.type,
-              size: file.size
-            },
-            serverResponse: result
-          });
-        } else if (response.status === 401) {
-          setError('登录已过期，请重新登录');
-          logout();
-          setTimeout(() => {
-            navigate('/login');
-          }, 2000);
-        } else if (response.status === 413) {
-          setError('文件太大，请选择小于2MB的图片');
-        } else if (response.status === 415) {
-          setError('不支持的图片格式');
-        } else {
-          setError(`上传失败: ${result?.message || '服务器错误'}`);
-        }
-        return;
-      }
-
-      // 成功响应
-      if (result && result.success) {
-        console.log('✅ 头像上传成功:', result.avatarUrl);
+      if (response.data && response.data.success) {
+        console.log('✅ 头像上传成功:', response.data.avatarUrl);
         
         // 更新用户信息
         const updatedUser = { 
           ...currentUser, 
-          avatar: result.avatarUrl 
+          avatar: response.data.avatarUrl 
         };
         updateUser(updatedUser);
         
         alert('头像更新成功！');
       } else {
-        setError(result?.message || '头像上传失败：服务器返回错误');
+        setError('头像上传失败：服务器返回错误');
       }
     } catch (error) {
       console.error('❌ 头像上传失败:', error);
       
-      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      if (error.response) {
+        // 服务器响应了错误状态码
+        const status = error.response.status;
+        if (status === 401) {
+          setError('登录已过期，请重新登录');
+          logout();
+          setTimeout(() => {
+            navigate('/login');
+          }, 2000);
+        } else if (status === 413) {
+          setError('文件太大，请选择小于2MB的图片');
+        } else if (status === 415) {
+          setError('不支持的图片格式');
+        } else if (status === 500) {
+          setError('服务器内部错误，请稍后重试');
+        } else {
+          setError(`上传失败: ${error.response.data?.message || '服务器错误'}`);
+        }
+      } else if (error.request) {
         setError('网络连接失败，请检查网络设置');
       } else {
-        setError(`上传失败: ${error.message || '请重试'}`);
+        setError('上传失败，请重试');
       }
     } finally {
       setAvatarLoading(false);
@@ -207,13 +182,33 @@ const Profile = () => {
     }
   }
 
-  // 其他函数保持不变...
+  // 点击菜单外部关闭菜单
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showAvatarMenu && !event.target.closest('.avatar-container')) {
+        setShowAvatarMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showAvatarMenu])
+
+  // 触发文件选择
+  const handleUploadClick = () => {
+    fileInputRef.current?.click()
+    setShowAvatarMenu(false)
+  }
+
   useEffect(() => {
     if (currentUser && activeTab === 'comics') {
       fetchUserComics();
     }
   }, [currentUser, activeTab]);
 
+  // 获取用户漫画
   const fetchUserComics = async () => {
     try {
       setLoading(true);
@@ -602,7 +597,6 @@ const Profile = () => {
         </div>
       )}
 
-      {/* 其他UI代码保持不变... */}
       <div className="profile-content" style={{
         display: 'grid',
         gridTemplateColumns: '250px 1fr',
