@@ -63,7 +63,7 @@ const Profile = () => {
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传 - 修复版本
+  // 处理头像上传 - 修复版本：使用 api 服务而不是直接 fetch
   const handleAvatarUpload = async (event) => {
     console.log('📁 文件选择变化:', event.target.files);
     
@@ -106,46 +106,58 @@ const Profile = () => {
       const formData = new FormData()
       formData.append('avatar', file)
 
-      // 获取 token
-      let token = localStorage.getItem('token');
-      
-      if (!token) {
-        setError('请先登录');
-        return;
-      }
-
-      // 清理 token
-      token = token.trim().replace(/^"(.*)"$/, '$1').replace(/[\n\r\t]/g, '');
-      
-      // 验证 JWT 格式
-      const tokenParts = token.split('.');
-      if (tokenParts.length !== 3) {
-        console.error('❌ JWT 格式错误，应有3部分，实际:', tokenParts.length);
-        setError('认证信息损坏，请重新登录');
-        logout();
-        return;
-      }
-
       console.log('✅ Token 格式验证通过，准备上传...');
+      console.log('🚀 使用 api 服务发送上传请求到 /users/avatar');
 
-      console.log('🚀 发送上传请求到 /api/users/avatar');
-
-      const response = await fetch('/api/users/avatar', {
-        method: 'PUT',
+      // 🔥 关键修改：使用 api 服务而不是直接 fetch
+      // 这样会自动包含认证头
+      const response = await api.put('/users/avatar', formData, {
         headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
       console.log('📡 收到响应，状态:', response.status);
+      console.log('📊 响应数据:', response.data);
 
-      const result = await response.json();
-      console.log('📊 响应数据:', result);
+      // 成功处理
+      if (response.data && response.data.success) {
+        console.log('✅ 头像上传成功:', response.data.avatarUrl);
+        
+        // 更新用户信息
+        const updatedUser = { 
+          ...currentUser, 
+          avatar: response.data.avatarUrl 
+        };
+        updateUser(updatedUser);
+        
+        // 更新本地存储的用户信息
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          const userData = JSON.parse(storedUser);
+          userData.avatar = response.data.avatarUrl;
+          localStorage.setItem('user', JSON.stringify(userData));
+        }
+        
+        alert('头像更新成功！');
+      } else {
+        setError(response.data?.message || '头像上传失败：服务器返回错误');
+      }
+    } catch (error) {
+      console.error('❌ 头像上传失败:', error);
+      
+      // 处理错误响应
+      if (error.response) {
+        const status = error.response.status;
+        const errorData = error.response.data;
+        
+        console.log('📊 错误响应详情:', {
+          status: status,
+          data: errorData
+        });
 
-      if (!response.ok) {
-        if (response.status === 401) {
-          const errorDetail = result?.message || '认证失败';
+        if (status === 401) {
+          const errorDetail = errorData?.message || '认证失败';
           console.error('🔐 401 错误详情:', errorDetail);
           
           setError(`上传失败: ${errorDetail}`);
@@ -157,46 +169,16 @@ const Profile = () => {
               navigate('/login');
             }, 3000);
           }
-          return;
-        } else if (response.status === 413) {
+        } else if (status === 413) {
           setError('文件太大，请选择小于2MB的图片');
-        } else if (response.status === 415) {
+        } else if (status === 415) {
           setError('不支持的图片格式');
-        } else if (response.status === 500) {
+        } else if (status === 500) {
           setError('服务器内部错误，请稍后重试');
         } else {
-          setError(`上传失败: ${result?.message || '服务器错误'}`);
+          setError(`上传失败: ${errorData?.message || `服务器错误 (${status})`}`);
         }
-        return;
-      }
-
-      // 成功处理
-      if (result && result.success) {
-        console.log('✅ 头像上传成功:', result.avatarUrl);
-        
-        // 更新用户信息
-        const updatedUser = { 
-          ...currentUser, 
-          avatar: result.avatarUrl 
-        };
-        updateUser(updatedUser);
-        
-        // 更新本地存储的用户信息
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          const userData = JSON.parse(storedUser);
-          userData.avatar = result.avatarUrl;
-          localStorage.setItem('user', JSON.stringify(userData));
-        }
-        
-        alert('头像更新成功！');
-      } else {
-        setError(result?.message || '头像上传失败：服务器返回错误');
-      }
-    } catch (error) {
-      console.error('❌ 头像上传失败:', error);
-      
-      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      } else if (error.request) {
         setError('网络连接失败，请检查网络设置');
       } else {
         setError(`上传失败: ${error.message || '请重试'}`);
