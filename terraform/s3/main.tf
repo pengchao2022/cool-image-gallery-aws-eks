@@ -148,9 +148,9 @@ data "aws_iam_policy_document" "comic_storage" {
     ]
   }
 
-  # 2. 允许公众只读取 comics/ 路径下的对象（允许 HTTP 和 HTTPS）
+  # 2. 允许公众只读取特定路径下的对象（允许 HTTP 和 HTTPS）
   statement {
-    sid    = "AllowPublicReadComicsOnly"
+    sid    = "AllowPublicReadSpecificPaths"
     effect = "Allow"
 
     principals {
@@ -164,6 +164,7 @@ data "aws_iam_policy_document" "comic_storage" {
 
     resources = [
       "${aws_s3_bucket.comic_storage.arn}/comics/*",
+      "${aws_s3_bucket.comic_storage.arn}/avatars/*",  # 添加这一行
     ]
   }
 }
