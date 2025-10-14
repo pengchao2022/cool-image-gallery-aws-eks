@@ -109,13 +109,9 @@ const Profile = () => {
       console.log('✅ Token 格式验证通过，准备上传...');
       console.log('🚀 使用 api 服务发送上传请求到 /users/avatar');
 
-      // 🔥 关键修改：使用 api 服务而不是直接 fetch
-      // 这样会自动包含认证头
-      const response = await api.put('/users/avatar', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
+      // 🔥 关键修改：移除 Content-Type 头，让浏览器自动设置
+      const response = await api.put('/users/avatar', formData);
+      // 注意：不要设置 headers，让浏览器自动处理 multipart/form-data
 
       console.log('📡 收到响应，状态:', response.status);
       console.log('📊 响应数据:', response.data);
