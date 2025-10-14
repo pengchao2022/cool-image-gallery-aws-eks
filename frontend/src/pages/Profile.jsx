@@ -63,14 +63,14 @@ const Profile = () => {
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传
+  // 处理头像上传 - 修复 boundary 错误
   const handleAvatarUpload = async (event) => {
     const file = event.target.files[0]
     if (!file) return
 
     // 验证文件类型
     if (!file.type.startsWith('image/')) {
-      setError('请选择图片文件')
+      setError('请选择图片文件 (JPG, PNG, GIF, WebP)')
       return
     }
 
@@ -84,15 +84,24 @@ const Profile = () => {
       setAvatarLoading(true)
       setError('')
 
+      console.log('📤 开始上传头像文件:', {
+        name: file.name,
+        type: file.type,
+        size: file.size
+      });
+
       const formData = new FormData()
       formData.append('avatar', file)
 
+      // 关键修复：移除 Content-Type，让浏览器自动处理 multipart boundary
       const response = await api.put('/users/avatar', formData, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'multipart/form-data'
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          // 移除 'Content-Type': 'multipart/form-data' - 让浏览器自动设置
         }
       })
+
+      console.log('✅ 上传响应:', response.data);
 
       if (response.data && response.data.success) {
         // 更新用户信息
@@ -101,16 +110,35 @@ const Profile = () => {
           avatar: response.data.avatarUrl 
         }
         updateUser(updatedUser)
-        alert('头像更新成功')
+        alert('头像更新成功！')
       } else {
-        setError('头像上传失败')
+        setError('头像上传失败：服务器返回错误')
       }
     } catch (error) {
-      console.error('头像上传失败:', error)
-      if (error.response && error.response.data) {
-        setError(error.response.data.message || '头像上传失败，请重试')
+      console.error('❌ 头像上传失败:', error);
+      
+      if (error.code === 'ECONNABORTED') {
+        setError('上传超时，请检查网络连接')
+      } else if (error.response) {
+        // 服务器响应了错误状态码
+        const status = error.response.status;
+        if (status === 502) {
+          setError('服务器暂时不可用，请稍后重试 (502 Bad Gateway)')
+        } else if (status === 413) {
+          setError('文件太大，请选择小于2MB的图片')
+        } else if (status === 415) {
+          setError('不支持的图片格式')
+        } else if (status >= 500) {
+          setError('服务器内部错误，请稍后重试')
+        } else {
+          setError(`上传失败: ${error.response.data?.message || '未知错误'}`)
+        }
+      } else if (error.request) {
+        // 请求发送了但没有收到响应
+        setError('网络连接失败，请检查网络设置')
       } else {
-        setError('头像上传失败，请重试')
+        // 其他错误
+        setError('上传失败，请重试')
       }
     } finally {
       setAvatarLoading(false)
@@ -515,7 +543,7 @@ const Profile = () => {
         </div>
       </div>
 
-      {/* 错误提示 */}
+      {/* 错误提示和加载状态 */}
       {error && (
         <div style={{ 
           background: '#ffe6e6', 
@@ -542,6 +570,23 @@ const Profile = () => {
           >
             <i className="fas fa-times"></i>
           </button>
+        </div>
+      )}
+
+      {avatarLoading && (
+        <div style={{ 
+          background: '#e3f2fd', 
+          color: '#1976d2', 
+          padding: '15px', 
+          borderRadius: '8px', 
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          animation: 'fadeIn 0.3s ease'
+        }}>
+          <i className="fas fa-spinner fa-spin"></i>
+          <span>正在上传头像，请稍候...</span>
         </div>
       )}
 
