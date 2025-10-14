@@ -8,72 +8,6 @@ const Home = () => {
   const [comics, setComics] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [userNames, setUserNames] = useState({}) // 存储用户ID到用户名的映射
-
-  // 获取用户信息 - 添加更多调试
-  const fetchUserInfo = async (userId) => {
-    try {
-      console.log(`🔍 开始获取用户 ${userId} 的信息...`)
-      
-      const response = await fetch(`/api/users/${userId}`)
-      console.log(`📡 用户API响应状态:`, response.status)
-      
-      if (!response.ok) {
-        console.error(`❌ 用户API请求失败: ${response.status}`)
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      
-      const data = await response.json()
-      console.log(`✅ 用户 ${userId} API响应数据:`, data)
-      
-      // 尝试不同的用户名字段
-      let userName = `用户${userId}` // 默认值
-      
-      if (data.username) {
-        userName = data.username
-        console.log(`✅ 从 username 字段获取用户名: ${userName}`)
-      } else if (data.user && data.user.username) {
-        userName = data.user.username
-        console.log(`✅ 从 data.user.username 字段获取用户名: ${userName}`)
-      } else if (data.name) {
-        userName = data.name
-        console.log(`✅ 从 name 字段获取用户名: ${userName}`)
-      } else if (data.success && data.data && data.data.username) {
-        userName = data.data.username
-        console.log(`✅ 从 data.data.username 字段获取用户名: ${userName}`)
-      } else {
-        console.warn(`⚠️ 用户 ${userId} 响应中没有找到用户名字段，使用默认值`)
-        console.log(`📊 用户 ${userId} 的完整响应数据:`, data)
-      }
-      
-      return userName
-    } catch (error) {
-      console.error(`❌ 获取用户 ${userId} 信息失败:`, error)
-      return `用户${userId}`
-    }
-  }
-
-  // 批量获取用户信息
-  const fetchUserNames = async (comicsList) => {
-    try {
-      const uniqueUserIds = [...new Set(comicsList.map(comic => comic.user_id))]
-      console.log('👥 需要获取用户信息的用户ID:', uniqueUserIds)
-      
-      const userNamesMap = {}
-      
-      // 为每个用户ID获取用户名
-      for (const userId of uniqueUserIds) {
-        const userName = await fetchUserInfo(userId)
-        userNamesMap[userId] = userName
-        console.log(`📝 设置用户映射: ${userId} -> ${userName}`)
-      }
-      
-      console.log('✅ 最终用户信息映射:', userNamesMap)
-      setUserNames(userNamesMap)
-    } catch (error) {
-      console.error('❌ 批量获取用户信息失败:', error)
-    }
-  }
 
   // 加载漫画数据
   useEffect(() => {
@@ -94,17 +28,7 @@ const Home = () => {
         
         if (data.success) {
           console.log('✅ 成功加载漫画数据:', data.comics.length, '个漫画')
-          
-          // 检查漫画数据的结构
-          if (data.comics.length > 0) {
-            console.log('🔍 第一个漫画的完整数据结构:', data.comics[0])
-            console.log('🔍 第一个漫画的所有字段:', Object.keys(data.comics[0]))
-          }
-          
           setComics(data.comics)
-          
-          // 获取用户信息
-          await fetchUserNames(data.comics)
         } else {
           throw new Error(data.message || '获取漫画数据失败')
         }
@@ -118,44 +42,6 @@ const Home = () => {
 
     fetchComics()
   }, [])
-
-  // 获取作者显示名称
-  const getAuthorName = (comic) => {
-    console.log(`🔍 获取漫画 "${comic.title}" 的作者信息:`, {
-      user_id: comic.user_id,
-      userNames: userNames,
-      hasMapping: userNames[comic.user_id] !== undefined
-    })
-    
-    // 如果已经有用户名映射，使用映射的用户名
-    if (userNames[comic.user_id]) {
-      const authorName = userNames[comic.user_id]
-      console.log(`✅ 使用映射的用户名: ${authorName}`)
-      return authorName
-    }
-    
-    // 如果漫画数据中直接包含作者信息
-    if (comic.author) {
-      console.log(`✅ 使用漫画中的 author 字段: ${comic.author}`)
-      return comic.author
-    }
-    
-    if (comic.username) {
-      console.log(`✅ 使用漫画中的 username 字段: ${comic.username}`)
-      return comic.username
-    }
-    
-    // 检查漫画数据中是否包含用户信息
-    if (comic.user && comic.user.username) {
-      console.log(`✅ 使用漫画中的 user.username 字段: ${comic.user.username}`)
-      return comic.user.username
-    }
-    
-    // 如果都没有，显示用户ID作为后备
-    const fallbackName = `用户${comic.user_id}`
-    console.log(`⚠️ 使用后备用户名: ${fallbackName}`)
-    return fallbackName
-  }
 
   // 处理图片加载失败
   const handleImageError = (e, comic) => {
@@ -240,7 +126,6 @@ const Home = () => {
                     <div className="skeleton-image"></div>
                     <div className="skeleton-info">
                       <div className="skeleton-title"></div>
-                      <div className="skeleton-author"></div>
                     </div>
                   </div>
                 ))}
@@ -280,7 +165,6 @@ const Home = () => {
                       </div>
                       <div className="preview-info">
                         <h4>{comic.title || '未命名作品'}</h4>
-                        <p>作者: {getAuthorName(comic)}</p>
                         {comic.views !== undefined && (
                           <small>浏览: {comic.views}次</small>
                         )}
