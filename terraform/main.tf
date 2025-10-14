@@ -64,7 +64,6 @@ module "iam" {
 }
 
 # EKS 模块
-# EKS 模块
 module "eks" {
   source = "./eks"
 
@@ -84,6 +83,20 @@ module "eks" {
   aws_region          = var.aws_region
   common_tags         = local.common_tags
 }
+
+# Redis 模块 (新增)
+module "redis" {
+  source = "./redis"
+
+  project_name        = var.project_name
+  environment         = var.environment
+  vpc_id              = module.vpc.vpc_id
+  private_subnet_ids  = module.vpc.private_subnet_ids
+  eks_cluster_sg_id   = module.eks.cluster_security_group_id
+  redis_node_type     = var.redis_node_type
+  common_tags         = local.common_tags
+}
+
 # 数据源
 data "aws_caller_identity" "current" {}
 

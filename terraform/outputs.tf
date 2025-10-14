@@ -117,3 +117,19 @@ output "s3_bucket_domain_name" {
   description = "S3 bucket domain name"
   value       = module.s3.bucket_domain_name
 }
+
+# Redis 输出
+output "redis_endpoint" {
+  description = "Redis cluster endpoint"
+  value       = module.redis.redis_endpoint
+}
+
+output "redis_url" {
+  description = "Redis connection URL"
+  value       = module.redis.redis_url
+}
+
+output "redis_port" {
+  description = "Redis port"
+  value       = module.redis.redis_port
+}
