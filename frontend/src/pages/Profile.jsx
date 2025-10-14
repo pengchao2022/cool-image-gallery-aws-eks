@@ -47,6 +47,19 @@ const Profile = () => {
     }
   }, [currentUser, activeTab])
 
+  // 处理卡片点击 - 跳转到漫画详情页
+  const handleCardClick = (comicId) => {
+    console.log(`🖱️ 点击漫画卡片ID: ${comicId}`)
+    navigate(`/comic/${comicId}`)
+  }
+
+  // 处理图片点击 - 跳转到漫画详情页
+  const handleImageClick = (comicId, e) => {
+    e.stopPropagation() // 防止事件冒泡
+    console.log(`🖱️ 点击漫画图片ID: ${comicId}`)
+    navigate(`/comic/${comicId}`)
+  }
+
   // 修复：从后端 API 获取所有漫画，然后过滤出当前用户的漫画
   const fetchUserComics = async () => {
     try {
@@ -403,7 +416,7 @@ const Profile = () => {
         {/* 主要内容区域 */}
         <div className="profile-main" style={{
           background: 'white',
-          borderRadius: '10point',
+          borderRadius: '10px',
           padding: '30px',
           boxShadow: '0 5px 15px rgba(0,0,0,0.1)'
         }}>
@@ -490,21 +503,29 @@ const Profile = () => {
                   gap: '25px'
                 }}>
                   {userComics.map(comic => (
-                    <div key={comic.id} className="comic-card" style={{
-                      border: '1px solid #eee',
-                      borderRadius: '12px',
-                      overflow: 'hidden',
-                      transition: 'transform 0.3s, box-shadow 0.3s',
-                      background: 'white',
-                      boxShadow: '0 3px 10px rgba(0,0,0,0.1)'
-                    }}>
+                    <div 
+                      key={comic.id} 
+                      className="comic-card" 
+                      onClick={() => handleCardClick(comic.id)}
+                      style={{
+                        border: '1px solid #eee',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        transition: 'transform 0.3s, box-shadow 0.3s',
+                        background: 'white',
+                        boxShadow: '0 3px 10px rgba(0,0,0,0.1)',
+                        cursor: 'pointer' // 添加指针光标
+                      }}
+                    >
                       <img 
                         src={getImageUrl(comic)}
                         alt={comic.title} 
+                        onClick={(e) => handleImageClick(comic.id, e)}
                         style={{
                           width: '100%',
                           height: '180px',
-                          objectFit: 'cover'
+                          objectFit: 'cover',
+                          cursor: 'pointer' // 图片也添加指针光标
                         }}
                         onError={(e) => handleImageError(e, comic)}
                       />
@@ -528,14 +549,20 @@ const Profile = () => {
                         <div style={{ display: 'flex', gap: '10px' }}>
                           <button 
                             className="btn btn-outline"
-                            onClick={() => handleEditComic(comic.id)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // 防止事件冒泡
+                              handleEditComic(comic.id);
+                            }}
                             style={{ flex: 1, padding: '8px 12px', fontSize: '0.8rem' }}
                           >
                             <i className="fas fa-edit"></i>
                           </button>
                           <button 
                             className="btn btn-outline"
-                            onClick={() => handleDeleteComic(comic.id)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // 防止事件冒泡
+                              handleDeleteComic(comic.id);
+                            }}
                             style={{ 
                               flex: 1, 
                               padding: '8px 12px', 
