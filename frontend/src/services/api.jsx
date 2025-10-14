@@ -7,16 +7,22 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`
   
+  // 🔥 关键修改：根据数据类型设置 headers
+  const isFormData = options.body instanceof FormData
+  const defaultHeaders = isFormData 
+    ? {} // FormData 时不要设置 Content-Type，让浏览器自动处理
+    : { 'Content-Type': 'application/json' }
+
   const config = {
     headers: {
-      'Content-Type': 'application/json',
+      ...defaultHeaders,
       ...options.headers,
     },
     ...options,
   }
 
-  // 如果是POST、PUT请求且有body，转换为JSON
-  if (config.body && typeof config.body === 'object' && !(config.body instanceof FormData)) {
+  // 如果是POST、PUT请求且有body，且不是FormData，转换为JSON
+  if (config.body && typeof config.body === 'object' && !isFormData) {
     config.body = JSON.stringify(config.body)
   }
 
@@ -33,6 +39,9 @@ async function request(endpoint, options = {}) {
 
   try {
     console.log('📡 发送请求:', url, config.method)
+    console.log('📋 请求头:', config.headers)
+    console.log('📦 数据类型:', isFormData ? 'FormData' : 'JSON')
+    
     const response = await fetch(url, config)
     
     console.log('📡 响应状态:', response.status)
@@ -256,6 +265,20 @@ const createApiClient = () => {
       getCurrentUser: () => request('/users/profile'),
       
       getRegistrationDate: (userId) => request(`/users/registration-date/${userId}`),
+      
+      // 🔥 添加头像上传专用方法
+      uploadAvatar: (formData) => {
+        console.log('🖼️ 上传头像，使用 PUT 方法')
+        return request('/users/avatar', {
+          method: 'PUT',
+          body: formData, // 这是 FormData，会自动不设置 Content-Type
+        })
+      },
+      
+      deleteAvatar: () => 
+        request('/users/avatar', {
+          method: 'DELETE',
+        }),
     },
 
     // 健康检查
