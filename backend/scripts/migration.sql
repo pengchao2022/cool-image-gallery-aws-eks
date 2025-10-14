@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) DEFAULT 'user',
+    avatar TEXT, -- 新增头像字段
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -26,6 +27,9 @@ CREATE TABLE IF NOT EXISTS comics (
 
 -- 确保 views 列存在
 ALTER TABLE comics ADD COLUMN IF NOT EXISTS views INTEGER DEFAULT 0;
+
+-- 确保 avatar 列存在（如果表已存在）
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
 
 -- 创建基础索引（不包含 views 索引）
 CREATE INDEX IF NOT EXISTS idx_comics_user_id ON comics(user_id);
