@@ -18,20 +18,6 @@ const Profile = () => {
 
   console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu, 'currentUser:', currentUser);
 
-  // 头像URL处理函数 - 使用代理路由绕过CORS
-  const getAvatarUrl = (avatarUrl, userId) => {
-    if (!avatarUrl) return null;
-    
-    // 如果是 S3 URL，使用代理路由绕过 CORS
-    if (avatarUrl.includes('s3.amazonaws.com') && userId) {
-      const proxyUrl = `/api/users/avatar-proxy/${userId}`;
-      console.log('🔗 使用代理URL:', proxyUrl, '原始URL:', avatarUrl);
-      return proxyUrl;
-    }
-    
-    return avatarUrl;
-  };
-
   // S3 权限调试函数
   const debugS3Access = async (avatarUrl) => {
     if (!avatarUrl) return;
@@ -58,17 +44,15 @@ const Profile = () => {
         console.log('✅ S3 访问正常 (200)');
       }
       
-      // 测试通过后端代理访问
-      if (currentUser?.id) {
-        console.log('🌐 测试通过后端代理访问...');
-        try {
-          const proxyUrl = `/api/users/avatar-proxy/${currentUser.id}`;
-          const proxyResponse = await fetch(proxyUrl, { method: 'HEAD' });
-          console.log('🔍 代理访问状态:', proxyResponse.status);
-          console.log('🔍 代理访问URL:', proxyUrl);
-        } catch (proxyError) {
-          console.log('❌ 代理访问失败:', proxyError.message);
-        }
+      // 测试通过后端代理访问（如果存在）
+      console.log('🌐 测试通过后端代理访问...');
+      try {
+        const proxyResponse = await fetch(`/api/users/avatar-proxy?url=${encodeURIComponent(avatarUrl)}`, { 
+          method: 'HEAD' 
+        });
+        console.log('🔍 代理访问状态:', proxyResponse.status);
+      } catch (proxyError) {
+        console.log('❌ 代理访问失败（可能没有代理路由）:', proxyError.message);
       }
       
     } catch (error) {
@@ -568,7 +552,7 @@ const Profile = () => {
           >
             {currentUser.avatar ? (
               <img 
-                src={getAvatarUrl(currentUser.avatar, currentUser.id)} 
+                src={currentUser.avatar} 
                 alt="用户头像" 
                 style={{
                   width: '100%',
@@ -576,13 +560,11 @@ const Profile = () => {
                   objectFit: 'cover'
                 }}
                 onError={(e) => {
-                  console.log('❌ 头像加载失败，可能是代理路由问题');
-                  console.log('🔍 使用的URL:', e.target.src);
+                  console.log('❌ 头像加载失败，可能是S3权限问题');
                   e.target.style.display = 'none';
                 }}
                 onLoad={(e) => {
                   console.log('✅ 头像加载成功');
-                  console.log('🔍 使用的URL:', e.target.src);
                 }}
               />
             ) : null}
