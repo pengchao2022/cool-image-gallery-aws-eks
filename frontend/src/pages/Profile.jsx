@@ -58,14 +58,20 @@ const Profile = () => {
 
   // 触发文件选择
   const handleUploadClick = () => {
+    console.log('🎯 点击上传按钮，触发文件选择');
     fileInputRef.current?.click()
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传 - 修复 JWT malformed 错误
+  // 处理头像上传 - 修复版本
   const handleAvatarUpload = async (event) => {
+    console.log('📁 文件选择变化:', event.target.files);
+    
     const file = event.target.files[0]
-    if (!file) return
+    if (!file) {
+      console.log('❌ 没有选择文件');
+      return
+    }
 
     // 验证文件类型
     if (!file.type.startsWith('image/')) {
@@ -81,6 +87,7 @@ const Profile = () => {
 
     // 检查用户ID是否存在
     if (!currentUser?.id) {
+      console.error('❌ 用户ID未定义:', currentUser);
       setError('用户信息不完整，请重新登录')
       return
     }
@@ -99,7 +106,7 @@ const Profile = () => {
       const formData = new FormData()
       formData.append('avatar', file)
 
-      // 仔细处理 token - 修复 JWT malformed 错误
+      // 获取 token
       let token = localStorage.getItem('token');
       
       if (!token) {
@@ -107,10 +114,10 @@ const Profile = () => {
         return;
       }
 
-      // 清理 token - 移除可能的空格、引号和特殊字符
+      // 清理 token
       token = token.trim().replace(/^"(.*)"$/, '$1').replace(/[\n\r\t]/g, '');
       
-      // 验证 JWT 格式（应该有3部分）
+      // 验证 JWT 格式
       const tokenParts = token.split('.');
       if (tokenParts.length !== 3) {
         console.error('❌ JWT 格式错误，应有3部分，实际:', tokenParts.length);
@@ -119,21 +126,19 @@ const Profile = () => {
         return;
       }
 
-      console.log('✅ Token 格式验证通过:', {
-        parts: tokenParts.length,
-        tokenPreview: `${token.substring(0, 20)}...`
-      });
+      console.log('✅ Token 格式验证通过，准备上传...');
+
+      console.log('🚀 发送上传请求到 /api/users/avatar');
 
       const response = await fetch('/api/users/avatar', {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`
-          // 不要设置 Content-Type，让浏览器自动处理 boundary
         },
         body: formData
       });
 
-      console.log('📡 响应状态:', response.status);
+      console.log('📡 收到响应，状态:', response.status);
 
       const result = await response.json();
       console.log('📊 响应数据:', result);
@@ -198,6 +203,7 @@ const Profile = () => {
       }
     } finally {
       setAvatarLoading(false);
+      // 重置文件输入，允许选择同一个文件再次上传
       event.target.value = '';
     }
   }
@@ -433,6 +439,7 @@ const Profile = () => {
           <div 
             className="user-avatar-large"
             onClick={(e) => {
+              console.log('🎯 头像被点击，显示/隐藏菜单');
               e.stopPropagation();
               e.preventDefault();
               setShowAvatarMenu(prev => !prev);
@@ -530,6 +537,7 @@ const Profile = () => {
             }}>
               <button
                 onClick={(e) => {
+                  console.log('📤 点击上传头像菜单项');
                   e.stopPropagation();
                   handleUploadClick();
                 }}
@@ -557,6 +565,7 @@ const Profile = () => {
               {currentUser.avatar && (
                 <button
                   onClick={(e) => {
+                    console.log('🗑️ 点击移除头像菜单项');
                     e.stopPropagation();
                     handleRemoveAvatar();
                   }}
