@@ -12,6 +12,7 @@ import Register from './pages/Register.jsx'
 import ComicDetail from './pages/ComicDetail.jsx'  // 导入漫画详情页
 import AuthError from './pages/AuthError.jsx'  // 导入新的认证错误页面
 import UploadError from './pages/UploadError.jsx' // 导入上传错误界面
+import Community from './pages/Community.jsx' // 导入社区页面
 import './App.css'
 
 // 修复的 ProtectedRoute 组件
@@ -46,6 +47,7 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/comic/:id" element={<ComicDetail />} />  {/* 添加漫画详情页路由 */}
+              <Route path="/community" element={<Community />} />  {/* 添加社区页面路由 */}
               
               {/* 错误页面路由 - 公开访问 */}
               <Route path="/auth-error" element={<AuthError />} />
