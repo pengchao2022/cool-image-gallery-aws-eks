@@ -17,7 +17,7 @@ const Profile = () => {
   const navigate = useNavigate()
 
   // 添加调试日志
-  console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu);
+  console.log('🔄 Profile组件渲染，showAvatarMenu:', showAvatarMenu, 'currentUser:', currentUser);
 
   const formatToBeijingTime = (utcTime) => {
     if (!utcTime) return '未知时间'
@@ -63,7 +63,7 @@ const Profile = () => {
     setShowAvatarMenu(false)
   }
 
-  // 处理头像上传 - 修复 boundary 错误
+  // 处理头像上传 - 修复 boundary 错误和用户ID问题
   const handleAvatarUpload = async (event) => {
     const file = event.target.files[0]
     if (!file) return
@@ -80,6 +80,13 @@ const Profile = () => {
       return
     }
 
+    // 检查用户ID是否存在 - 关键修复
+    if (!currentUser?.id) {
+      console.error('❌ 用户ID未定义:', currentUser);
+      setError('用户信息不完整，请重新登录')
+      return
+    }
+
     try {
       setAvatarLoading(true)
       setError('')
@@ -87,11 +94,14 @@ const Profile = () => {
       console.log('📤 开始上传头像文件:', {
         name: file.name,
         type: file.type,
-        size: file.size
+        size: file.size,
+        userId: currentUser.id // 添加用户ID日志
       });
 
       const formData = new FormData()
       formData.append('avatar', file)
+      // 可选：添加用户ID到formData，确保后端能获取到
+      formData.append('userId', currentUser.id.toString())
 
       // 关键修复：移除 Content-Type，让浏览器自动处理 multipart boundary
       const response = await api.put('/users/avatar', formData, {
@@ -117,6 +127,7 @@ const Profile = () => {
     } catch (error) {
       console.error('❌ 头像上传失败:', error);
       
+      // 更详细的错误处理
       if (error.code === 'ECONNABORTED') {
         setError('上传超时，请检查网络连接')
       } else if (error.response) {
@@ -128,6 +139,14 @@ const Profile = () => {
           setError('文件太大，请选择小于2MB的图片')
         } else if (status === 415) {
           setError('不支持的图片格式')
+        } else if (status === 500) {
+          // 处理数据库错误
+          if (error.response.data?.message?.includes('parameter $1') || 
+              error.response.data?.message?.includes('SequelizeDatabaseError')) {
+            setError('服务器数据库错误，请联系管理员')
+          } else {
+            setError('服务器内部错误，请稍后重试')
+          }
         } else if (status >= 500) {
           setError('服务器内部错误，请稍后重试')
         } else {
@@ -147,8 +166,14 @@ const Profile = () => {
     }
   }
 
-  // 移除头像
+  // 移除头像 - 添加用户ID检查
   const handleRemoveAvatar = async () => {
+    // 检查用户ID是否存在
+    if (!currentUser?.id) {
+      setError('用户信息不完整，请重新登录')
+      return
+    }
+
     try {
       setAvatarLoading(true)
       const response = await api.delete('/users/avatar', {
@@ -540,6 +565,8 @@ const Profile = () => {
           <h1 style={{ marginBottom: '10px', color: 'var(--dark)' }}>{currentUser.username}</h1>
           <p style={{ color: '#666', marginBottom: '5px' }}>邮箱: {currentUser.email}</p>
           <p style={{ color: '#666' }}>注册时间: {registrationDate}</p>
+          {/* 显示用户ID用于调试 */}
+          <p style={{ color: '#999', fontSize: '0.8rem' }}>用户ID: {currentUser.id || '未定义'}</p>
         </div>
       </div>
 
