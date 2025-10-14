@@ -14,11 +14,6 @@ variable "image_tag_mutability" {
   description = "Image tag mutability setting"
   type        = string
   default     = "MUTABLE"
-
-  validation {
-    condition     = contains(["MUTABLE", "IMMUTABLE"], var.image_tag_mutability)
-    error_message = "Image tag mutability must be either MUTABLE or IMMUTABLE."
-  }
 }
 
 variable "scan_on_push" {
@@ -31,11 +26,6 @@ variable "encryption_type" {
   description = "Encryption type for ECR repositories"
   type        = string
   default     = "AES256"
-
-  validation {
-    condition     = contains(["AES256", "KMS"], var.encryption_type)
-    error_message = "Encryption type must be either AES256 or KMS."
-  }
 }
 
 variable "keep_last_images" {
@@ -64,4 +54,11 @@ variable "common_tags" {
     Environment = "prod"
     ManagedBy   = "terraform"
   }
+}
+
+# 只增加这一个变量来控制是否创建社区仓库
+variable "enable_community_repository" {
+  description = "Whether to create the community service ECR repository"
+  type        = bool
+  default     = true
 }
