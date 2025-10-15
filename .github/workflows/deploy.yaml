@@ -214,45 +214,11 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          echo "🏗 Building and pushing backend image: $BACKEND_IMAGE"
+          echo "Building and pushing backend image: $BACKEND_IMAGE"
           
-          # 详细的构建前检查
-          echo "=== 🔍 PRE-BUILD DEBUG ==="
-          echo "Current directory: $(pwd)"
-          echo "Files in backend directory:"
-          ls -la
-          echo "Scripts directory contents:"
-          ls -la scripts/ || echo "❌ scripts directory not found"
-          echo "Checking .dockerignore:"
-          cat .dockerignore 2>/dev/null || echo "No .dockerignore file"
-          echo "=== END PRE-BUILD DEBUG ==="
-          
-          # 使用详细的构建输出
-          echo "🔧 Building Docker image with detailed output..."
-          docker build --no-cache --progress=plain -t $BACKEND_IMAGE .
-          
-          # 验证镜像内容
-          echo "🔍 Verifying image contents..."
-          docker run --rm $BACKEND_IMAGE sh -c "
-            echo '=== Image Contents Debug ===';
-            echo 'Current directory:';
-            pwd;
-            echo 'Root directory contents:';
-            ls -la /;
-            echo 'App directory contents:';
-            ls -la /app/;
-            echo '=== Checking scripts directory ===';
-            ls -la /app/scripts/ 2>/dev/null || echo '❌ SCRIPTS DIRECTORY NOT FOUND';
-            echo '=== Searching for migrate.js ===';
-            find /app -name 'migrate.js' -type f 2>/dev/null || echo '❌ migrate.js NOT FOUND';
-            echo '=== Checking file permissions ===';
-            ls -la /app/scripts/migrate.js 2>/dev/null || echo '❌ Cannot check migrate.js permissions';
-            echo '=== End Image Debug ==='
-          "
-          
-          echo "📤 Pushing backend image to ECR..."
+          # 使用 --no-cache 确保重新构建
+          docker build --no-cache -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
-          echo "✅ Backend image pushed successfully"
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
 
       - name: 🎨 Build Frontend Image
@@ -261,7 +227,7 @@ jobs:
           cd frontend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
-          echo "🎨 Building and pushing frontend image: $FRONTEND_IMAGE"
+          echo "Building and pushing frontend image: $FRONTEND_IMAGE"
           docker build -t $FRONTEND_IMAGE .
           docker push $FRONTEND_IMAGE
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
@@ -272,7 +238,7 @@ jobs:
           cd community-service
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           COMMUNITY_IMAGE="$COMMUNITY_ECR_URL:$IMAGE_TAG"
-          echo "💬 Building and pushing community service image: $COMMUNITY_IMAGE"
+          echo "Building and pushing community service image: $COMMUNITY_IMAGE"
           docker build -t $COMMUNITY_IMAGE .
           docker push $COMMUNITY_IMAGE
           echo "image_tag=$COMMUNITY_IMAGE" >> $GITHUB_OUTPUT
@@ -312,8 +278,11 @@ jobs:
       - name: 🧹 Clean Up Existing Database Jobs
         run: |
           kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          kubectl delete job db-migration-debug -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          kubectl delete job community-db-setup-debug -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          kubectl delete job community-schema-setup-debug -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
 
       - name: 🔧 Update Kubernetes Secrets for Database
@@ -344,61 +313,194 @@ jobs:
           kubectl apply -f configs/rds-secret.yaml
           kubectl apply -f configs/backend-secret.yaml
 
-      - name: 🗃 Run Main Database Migrations
+      - name: 🔧 Create Debug Migration Job for Scripts Check
         run: |
-          BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
-          echo "🔄 Running main database migrations with image: $BACKEND_IMAGE"
+          cat > k8s/migrations/db-migration-debug.yaml << EOF
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: db-migration-debug
+            namespace: ${{ env.NAMESPACE }}
+          spec:
+            template:
+              spec:
+                containers:
+                - name: migration
+                  image: ${{ needs.build-images.outputs.backend_image }}
+                  command: ["/bin/sh"]
+                  args: 
+                    - "-c"
+                    - |
+                      echo "=== 开始调试：检查容器内文件系统 ==="
+                      echo "当前工作目录:"
+                      pwd
+                      echo ""
+                      echo "根目录内容:"
+                      ls -la /
+                      echo ""
+                      echo "app 目录内容:"
+                      ls -la /app
+                      echo ""
+                      echo "检查 scripts 文件夹是否存在:"
+                      find /app -name "scripts" -type d 2>/dev/null || echo "scripts 文件夹未找到"
+                      echo ""
+                      echo "如果找到 scripts 文件夹，显示其内容:"
+                      if [ -d "/app/scripts" ]; then
+                        echo "scripts 文件夹内容:"
+                        ls -la /app/scripts/
+                        echo ""
+                        echo "检查 migrate.js 文件:"
+                        if [ -f "/app/scripts/migrate.js" ]; then
+                          echo "migrate.js 文件存在"
+                          echo "文件内容前几行:"
+                          head -20 /app/scripts/migrate.js
+                        else
+                          echo "migrate.js 文件不存在"
+                          echo "在 /app 目录中查找 .js 文件:"
+                          find /app -name "*.js" -type f 2>/dev/null | head -10
+                        fi
+                      fi
+                      echo ""
+                      echo "环境变量:"
+                      env | grep -E "(DB|DATABASE|RDS)" | sort
+                      echo ""
+                      echo "=== 调试信息输出完成 ==="
+                      echo "容器将保持运行 1 小时，请使用以下命令进入检查:"
+                      echo "kubectl exec -it \$(kubectl get pods -l job-name=db-migration-debug -o jsonpath='{.items[0].metadata.name}') -n ${{ env.NAMESPACE }} -- /bin/sh"
+                      sleep 3600
+                  envFrom:
+                  - secretRef:
+                      name: backend-secret
+                  - secretRef:
+                      name: rds-secret
+                restartPolicy: Never
+            backoffLimit: 0
+          EOF
+
+      - name: 🚀 Run Debug Migration Job
+        run: |
+          kubectl apply -f k8s/migrations/db-migration-debug.yaml
+          echo "等待调试 Job 启动..."
+          sleep 30
           
-          # 使用现有的 db-migration-job.yaml 文件，只替换镜像
-          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
-          kubectl apply -f /tmp/db-migration-job.yaml
+          # 获取 Pod 名称
+          POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration-debug -o jsonpath='{.items[0].metadata.name}')
+          echo "调试 Pod 名称: $POD_NAME"
+          
+          # 显示 Pod 日志
+          echo "=== 调试 Pod 日志 ==="
+          kubectl logs $POD_NAME -n ${{ env.NAMESPACE }}
+          echo "=== 日志结束 ==="
+          
+          echo ""
+          echo "🔍 现在你可以进入 Pod 检查 scripts 文件夹:"
+          echo "kubectl exec -it $POD_NAME -n ${{ env.NAMESPACE }} -- /bin/sh"
+          echo ""
+          echo "在容器内可以运行以下命令:"
+          echo "  ls -la /app/scripts/"
+          echo "  find /app -name 'migrate.js'"
+          echo "  ls -la /"
+          echo ""
+          echo "⚠️  注意: 这个 Pod 会运行 1 小时，检查完成后请手动删除:"
+          echo "kubectl delete job db-migration-debug -n ${{ env.NAMESPACE }}"
 
-          echo "⏳ Waiting for main database migration to complete..."
-          if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
-            MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
-            echo "✅ Main database migration successful"
-            kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            kubectl delete job db-migration -n ${{ env.NAMESPACE }}
-          else
-            echo "❌ Main database migration failed"
-            kubectl describe job db-migration -n ${{ env.NAMESPACE }}
-            LATEST_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
-            kubectl logs $LATEST_POD -n ${{ env.NAMESPACE }}
-            exit 1
-          fi
-
-      - name: 🗃 Create Community Database
+      - name: 🗃 Create Community Database (Debug Version)
         run: |
-          # 使用现有的 community-schema-job.yaml 文件
-          kubectl apply -f k8s/migrations/community-schema-job.yaml
-
-          echo "⏳ Waiting for Community database creation to complete..."
-          if kubectl wait --for=condition=complete job/community-db-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community database creation successful"
-            kubectl delete job community-db-setup -n ${{ env.NAMESPACE }}
-          else
-            echo "❌ Community database creation failed"
-            kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }}
-            exit 1
+          cat > k8s/migrations/community-db-setup-debug.yaml << EOF
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: community-db-setup-debug
+            namespace: ${{ env.NAMESPACE }}
+          spec:
+            template:
+              spec:
+                containers:
+                - name: community-db-setup
+                  image: ${{ needs.build-images.outputs.backend_image }}
+                  command: ["/bin/sh"]
+                  args: 
+                    - "-c"
+                    - |
+                      echo "=== Community 数据库调试 ==="
+                      echo "检查容器内文件系统..."
+                      echo "当前目录: \$(pwd)"
+                      echo "根目录内容:"
+                      ls -la /
+                      echo ""
+                      echo "app 目录内容:"
+                      ls -la /app
+                      echo ""
+                      echo "查找 SQL 文件:"
+                      find /app -name "*.sql" -type f 2>/dev/null
+                      echo ""
+                      echo "环境变量:"
+                      env | grep -E "(COMMUNITY|DB|DATABASE)" | sort
+                      echo ""
+                      echo "=== 调试信息输出完成 ==="
+                      echo "容器将保持运行 1 小时..."
+                      sleep 3600
+                  envFrom:
+                  - secretRef:
+                      name: backend-secret
+                  - secretRef:
+                      name: rds-secret
+                restartPolicy: Never
+            backoffLimit: 0
+          EOF
+          
+          kubectl apply -f k8s/migrations/community-db-setup-debug.yaml
+          sleep 20
+          
+          # 获取 Pod 名称并显示日志
+          POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=community-db-setup-debug -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
+          if [ "$POD_NAME" != "not-found" ]; then
+            echo "=== Community DB Setup 调试日志 ==="
+            kubectl logs $POD_NAME -n ${{ env.NAMESPACE }}
+            echo "=== 日志结束 ==="
           fi
 
-      - name: 🗃 Create Community Database Tables
+      - name: 📝 Manual Intervention Required
         run: |
-          kubectl apply -f k8s/migrations/community-schema-job.yaml
+          echo "================================================"
+          echo "🔧 手动调试模式已启用"
+          echo "================================================"
+          echo ""
+          echo "现在你需要手动进入 Pod 检查 scripts 文件夹:"
+          echo ""
+          echo "1. 检查主数据库迁移脚本:"
+          echo "   kubectl exec -it \$(kubectl get pods -l job-name=db-migration-debug -o jsonpath='{.items[0].metadata.name}') -n ${{ env.NAMESPACE }} -- /bin/sh"
+          echo ""
+          echo "2. 在容器内运行以下命令:"
+          echo "   ls -la /app/"
+          echo "   find /app -name scripts"
+          echo "   ls -la /app/scripts/  # 如果存在"
+          echo "   cat /app/scripts/migrate.js  # 如果存在"
+          echo ""
+          echo "3. 检查 Community 数据库设置:"
+          echo "   kubectl exec -it \$(kubectl get pods -l job-name=community-db-setup-debug -o jsonpath='{.items[0].metadata.name}') -n ${{ env.NAMESPACE }} -- /bin/sh"
+          echo ""
+          echo "4. 调试完成后，继续工作流执行:"
+          echo "   - 在 GitHub Actions 界面点击 'Skip workflow' 跳过剩余步骤"
+          echo "   - 或者等待 1 小时后超时继续"
+          echo ""
+          echo "5. 修复问题后，重新运行工作流"
+          echo "================================================"
 
-          echo "⏳ Waiting for Community database table structure creation to complete..."
-          if kubectl wait --for=condition=complete job/community-schema-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community database table structure creation successful"
-            kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }}
-          else
-            echo "❌ Community database table structure creation failed"
-            kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }}
-            exit 1
-          fi
+      - name: ⏰ Wait for Manual Debugging (Optional)
+        run: |
+          echo "等待手动调试... (15分钟超时)"
+          sleep 900
+          echo "继续执行工作流..."
+
+      - name: 🧹 Cleanup Debug Jobs
+        run: |
+          kubectl delete job db-migration-debug -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          kubectl delete job community-db-setup-debug -n ${{ env.NAMESPACE }} --ignore-not-found=true
 
       - name: ✅ Verify Database Configuration
         run: |
-          echo "✅ Database configuration completed"
+          echo "数据库调试完成，请根据检查结果修复 Dockerfile 或构建过程"
 
   deploy-frontend:
     name: "Deploy Frontend Service to EKS"
@@ -494,7 +596,7 @@ jobs:
 
       - name: ✅ Verify Frontend Service
         run: |
-          echo "✅ Frontend service deployed successfully"
+          echo "Frontend service deployed successfully"
 
   deploy-backend:
     name: "Deploy Backend Service to EKS"
@@ -560,7 +662,7 @@ jobs:
 
       - name: ✅ Verify Backend Service
         run: |
-          echo "✅ Backend service deployed successfully"
+          echo "Backend service deployed successfully"
 
   deploy-community:
     name: "Deploy Community Service to EKS"
@@ -655,7 +757,7 @@ jobs:
 
       - name: ✅ Verify Community Service
         run: |
-          echo "✅ Community service deployed successfully"
+          echo "Community service deployed successfully"
 
       - name: 🌐 Get ALB URL
         id: get-alb-url
@@ -684,4 +786,8 @@ jobs:
           echo "   ✅ Backend API Service: Ready" 
           echo "   ✅ Community Service: Ready"
           echo "   ✅ Database Configuration: Complete"
+          echo ""
+          echo "⚠️  IMPORTANT: Database migrations were skipped for debugging"
+          echo "   Run migrations manually after fixing scripts issue:"
+          echo "   kubectl run db-migration --image=${{ needs.build-images.outputs.backend_image }} --restart=Never --rm -it -- node scripts/migrate.js"
           echo "================================================"
