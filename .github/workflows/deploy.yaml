@@ -59,6 +59,7 @@ jobs:
       - name: ⚙️ Terraform Init
         run: |
           cd terraform
+          echo "🔧 Initializing Terraform with backend bucket: ${{ env.TF_BACKEND_BUCKET }}"
           terraform init \
             -backend-config="bucket=${{ env.TF_BACKEND_BUCKET }}" \
             -backend-config="key=terraform/state/terraform.tfstate" \
@@ -69,11 +70,13 @@ jobs:
       - name: ✅ Terraform Validate
         run: |
           cd terraform
+          echo "🔍 Validating Terraform configuration..."
           terraform validate
 
       - name: 🚀 Terraform Plan and Apply
         run: |
           cd terraform
+          echo "📋 Creating Terraform plan..."
           terraform plan -out=tfplan \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
@@ -81,15 +84,22 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="community_db_password=${{ secrets.COMMUNITY_DB_PASSWORD }}" \
             -var="community_db_username=${{ secrets.COMMUNITY_DB_USERNAME }}" \
-            -var="community_db_name=${{ secrets.COMMUNITY_DB_NAME }}" \
-            -var="redis_password=${{ secrets.REDIS_PASSWORD }}"
+            -var="community_db_name=${{ secrets.COMMUNITY_DB_NAME }}"
+          
+          echo "🚀 Applying Terraform configuration..."
           terraform apply -auto-approve tfplan
 
       - name: 📋 Get Terraform Outputs
         id: terraform-outputs
         run: |
           cd terraform
+          echo "📊 Getting Terraform outputs..."
           terraform output -json > outputs.json
+          
+          # 调试：输出所有 Terraform 输出
+          echo "=== 🔍 TERRAFORM OUTPUTS DEBUG INFO ==="
+          cat outputs.json
+          echo "=== END TERRAFORM OUTPUTS ==="
           
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
@@ -114,6 +124,21 @@ jobs:
           COMMUNITY_DB_NAME="communitydb"
           COMMUNITY_DB_USERNAME="community_user"
           
+          # 调试：输出关键变量
+          echo "=== 🔍 KEY OUTPUT VARIABLES ==="
+          echo "BACKEND_ECR_URL: $BACKEND_ECR_URL"
+          echo "FRONTEND_ECR_URL: $FRONTEND_ECR_URL"
+          echo "COMMUNITY_ECR_URL: $COMMUNITY_ECR_URL"
+          echo "RDS_ENDPOINT: $RDS_ENDPOINT"
+          echo "REDIS_HOST: $REDIS_HOST"
+          echo "=== END KEY VARIABLES ==="
+          
+          # 如果 community_ecr_url 为空，使用 backend_ecr_url 作为备用
+          if [ -z "$COMMUNITY_ECR_URL" ]; then
+            echo "⚠️ WARNING: COMMUNITY_ECR_URL is empty, using BACKEND_ECR_URL as fallback"
+            COMMUNITY_ECR_URL="$BACKEND_ECR_URL"
+          fi
+          
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "community_ecr_url=$COMMUNITY_ECR_URL" >> $GITHUB_OUTPUT
@@ -137,6 +162,7 @@ jobs:
 
       - name: ☸️ Update kubeconfig
         run: |
+          echo "🔧 Updating kubeconfig for EKS cluster: ${{ env.CLUSTER_NAME }}"
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
   build-images:
@@ -165,29 +191,70 @@ jobs:
       - name: 🔍 Get AWS Account ID and ECR Registry
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "🔍 AWS Account ID: $ACCOUNT_ID"
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
           ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "🔍 ECR Registry: $ECR_REGISTRY"
           echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
 
       - name: 🔐 Login to ECR
         run: |
+          echo "🔐 Logging into ECR..."
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-      - name: 🔍 Set ECR URLs
+      - name: 🔍 Set ECR URLs with Debug Info
         run: |
-          echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
-          echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
-          echo "COMMUNITY_ECR_URL=${{ needs.terraform-infrastructure.outputs.community_ecr_url }}" >> $GITHUB_ENV
+          BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
+          FRONTEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
+          COMMUNITY_ECR_URL="${{ needs.terraform-infrastructure.outputs.community_ecr_url }}"
+          
+          echo "=== 🔍 ECR URLS DEBUG INFO ==="
+          echo "BACKEND_ECR_URL from outputs: $BACKEND_ECR_URL"
+          echo "FRONTEND_ECR_URL from outputs: $FRONTEND_ECR_URL"
+          echo "COMMUNITY_ECR_URL from outputs: $COMMUNITY_ECR_URL"
+          echo "=== END ECR URLS DEBUG ==="
+          
+          # 如果 community_ecr_url 为空，使用 backend_ecr_url
+          if [ -z "$COMMUNITY_ECR_URL" ]; then
+            echo "⚠️ WARNING: COMMUNITY_ECR_URL is empty, using BACKEND_ECR_URL as fallback"
+            COMMUNITY_ECR_URL="$BACKEND_ECR_URL"
+          fi
+          
+          # 验证所有 ECR URLs 都不为空
+          if [ -z "$BACKEND_ECR_URL" ]; then
+            echo "❌ ERROR: BACKEND_ECR_URL is empty!"
+            exit 1
+          fi
+          if [ -z "$FRONTEND_ECR_URL" ]; then
+            echo "❌ ERROR: FRONTEND_ECR_URL is empty!"
+            exit 1
+          fi
+          if [ -z "$COMMUNITY_ECR_URL" ]; then
+            echo "❌ ERROR: COMMUNITY_ECR_URL is empty even after fallback!"
+            exit 1
+          fi
+          
+          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
+          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
+          echo "COMMUNITY_ECR_URL=$COMMUNITY_ECR_URL" >> $GITHUB_ENV
+          
+          echo "✅ Final ECR URLs:"
+          echo "Backend: $BACKEND_ECR_URL"
+          echo "Frontend: $FRONTEND_ECR_URL"
+          echo "Community: $COMMUNITY_ECR_URL"
 
       - name: 🏗 Check if Backend Image Exists
         id: check-backend
         run: |
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
+          echo "🔍 Checking if backend image exists: $BACKEND_IMAGE"
           if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
+            echo "✅ Backend image already exists"
             echo "image_exists=true" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
           else
+            echo "📦 Backend image does not exist, will build new image"
             echo "image_exists=false" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
           fi
@@ -199,9 +266,11 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing backend image: $BACKEND_IMAGE"
+          echo "🏗 Building and pushing backend image: $BACKEND_IMAGE"
           docker build -t $BACKEND_IMAGE .
+          echo "📤 Pushing backend image to ECR..."
           docker push $BACKEND_IMAGE
+          echo "✅ Backend image pushed successfully"
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
 
       - name: 🎨 Build Frontend Image
@@ -210,9 +279,11 @@ jobs:
           cd frontend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing frontend image: $FRONTEND_IMAGE"
+          echo "🎨 Building and pushing frontend image: $FRONTEND_IMAGE"
           docker build -t $FRONTEND_IMAGE .
+          echo "📤 Pushing frontend image to ECR..."
           docker push $FRONTEND_IMAGE
+          echo "✅ Frontend image pushed successfully"
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
 
       - name: 💬 Build Community Service Image
@@ -221,9 +292,29 @@ jobs:
           cd community-service
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           COMMUNITY_IMAGE="$COMMUNITY_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing community service image: $COMMUNITY_IMAGE"
+          
+          echo "=== 🔍 COMMUNITY IMAGE BUILD DEBUG ==="
+          echo "COMMUNITY_ECR_URL: $COMMUNITY_ECR_URL"
+          echo "IMAGE_TAG: $IMAGE_TAG"
+          echo "FULL_IMAGE_TAG: $COMMUNITY_IMAGE"
+          echo "=== END DEBUG ==="
+          
+          # 验证镜像标签格式
+          if [[ -z "$COMMUNITY_ECR_URL" ]]; then
+            echo "❌ ERROR: COMMUNITY_ECR_URL is empty!"
+            exit 1
+          fi
+          
+          if [[ ! "$COMMUNITY_IMAGE" =~ ^[a-zA-Z0-9./:-]+:[a-zA-Z0-9.-]+$ ]]; then
+            echo "❌ ERROR: Invalid image tag format: $COMMUNITY_IMAGE"
+            exit 1
+          fi
+          
+          echo "💬 Building and pushing community service image: $COMMUNITY_IMAGE"
           docker build -t $COMMUNITY_IMAGE .
+          echo "📤 Pushing community image to ECR..."
           docker push $COMMUNITY_IMAGE
+          echo "✅ Community image pushed successfully"
           echo "image_tag=$COMMUNITY_IMAGE" >> $GITHUB_OUTPUT
 
   configure-rds-database:
@@ -248,24 +339,27 @@ jobs:
 
       - name: ☸️ Update kubeconfig
         run: |
+          echo "🔧 Updating kubeconfig for EKS cluster"
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
       - name: 🧰 Setup kubectl
         run: |
+          echo "🔧 Installing kubectl..."
           sudo snap install kubectl --classic
 
       - name: 🗃 Create Namespace
         run: |
+          echo "📁 Creating namespace: ${{ env.NAMESPACE }}"
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
       - name: 🧹 Clean Up Existing Database Jobs
         run: |
-          echo "=== 清理已存在的数据库 Job ==="
+          echo "🧹 Cleaning up existing database jobs..."
           kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
-          echo "✅ 清理完成"
+          echo "✅ Cleanup completed"
 
       - name: 🔧 Update Kubernetes Secrets for Database
         run: |
@@ -277,12 +371,21 @@ jobs:
           export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
           
+          echo "=== 🔍 DATABASE CONFIG DEBUG ==="
+          echo "RDS_ENDPOINT: $RDS_ENDPOINT"
+          echo "RDS_HOST: $RDS_HOST"
+          echo "RDS_PORT: $RDS_PORT"
+          echo "RDS_USERNAME: $RDS_USERNAME"
+          echo "RDS_DATABASE: $RDS_DATABASE"
+          echo "=== END DEBUG ==="
+          
           # 新增 Community 数据库环境变量
           export COMMUNITY_DB_NAME="communitydb"
           export COMMUNITY_DB_USERNAME="community_user"
           export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
           export COMMUNITY_JWT_SECRET="${{ secrets.COMMUNITY_JWT_SECRET }}"
           
+          echo "🔧 Updating database secrets..."
           envsubst < k8s/configs/rds-secret.yaml > k8s/configs/rds-secret.yaml.tmp
           mv k8s/configs/rds-secret.yaml.tmp k8s/configs/rds-secret.yaml
           
@@ -292,34 +395,36 @@ jobs:
       - name: 🚀 Apply Database Secrets
         run: |
           cd k8s
+          echo "🔐 Applying database secrets..."
           kubectl apply -f configs/rds-secret.yaml
           kubectl apply -f configs/backend-secret.yaml
 
       - name: 🗃 Run Main Database Migrations
         run: |
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
+          echo "🔄 Running main database migrations with image: $BACKEND_IMAGE"
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
           kubectl apply -f /tmp/db-migration-job.yaml
 
-          echo "⏳ 等待主数据库迁移完成..."
+          echo "⏳ Waiting for main database migration to complete..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
-            echo "✅ 主数据库迁移成功"
-            echo "=== 迁移日志 ==="
+            echo "✅ Main database migration successful"
+            echo "=== Migration Logs ==="
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
-            echo "❌ 主数据库迁移失败"
-            echo "=== 检查 Job 状态 ==="
+            echo "❌ Main database migration failed"
+            echo "=== Checking Job Status ==="
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
-            echo "=== 检查 Pod 日志 ==="
+            echo "=== Checking Pod Logs ==="
             kubectl logs job/db-migration -n ${{ env.NAMESPACE }}
             exit 1
           fi
 
       - name: 🗃 Create Community Database
         run: |
-          echo "=== 创建 Community 数据库 ==="
+          echo "🗃 Creating Community database..."
           
           # 创建 Kubernetes Job 来执行数据库创建
           cat <<EOF | kubectl apply -f -
@@ -354,62 +459,69 @@ jobs:
                   - -c
                   - |
                     set -e
-                    echo "🔄 开始创建 Community 数据库..."
+                    echo "🔄 Starting Community database setup..."
                     
-                    # 等待 RDS 可用
-                    echo "⏳ 等待 RDS 可用..."
+                    echo "Environment variables:"
+                    echo "PGHOST: \$PGHOST"
+                    echo "PGPORT: \$PGPORT" 
+                    echo "PGUSER: \$PGUSER"
+                    echo "COMMUNITY_DB_NAME: \$COMMUNITY_DB_NAME"
+                    echo "COMMUNITY_DB_USERNAME: \$COMMUNITY_DB_USERNAME"
+                    
+                    # Wait for RDS to be available
+                    echo "⏳ Waiting for RDS to be available..."
                     for i in \$(seq 1 30); do
                       if psql -d postgres -c "\q" 2>/dev/null; then
-                        echo "✅ RDS 连接成功"
+                        echo "✅ RDS connection successful"
                         break
                       else
-                        echo "⏳ 尝试 \$i: RDS 连接失败，等待 10 秒..."
+                        echo "⏳ Attempt \$i: RDS connection failed, waiting 10 seconds..."
                         sleep 10
                       fi
                     done
                     
-                    # 检查数据库是否已存在，如果不存在则创建
-                    echo "检查数据库是否已存在: \$COMMUNITY_DB_NAME"
+                    # Check if database exists, create if not
+                    echo "Checking if database exists: \$COMMUNITY_DB_NAME"
                     if psql -d postgres -c "\l" | grep -q "\$COMMUNITY_DB_NAME"; then
-                      echo "✅ 数据库 \$COMMUNITY_DB_NAME 已存在，跳过创建"
+                      echo "✅ Database \$COMMUNITY_DB_NAME already exists, skipping creation"
                     else
-                      echo "创建数据库: \$COMMUNITY_DB_NAME"
+                      echo "Creating database: \$COMMUNITY_DB_NAME"
                       psql -d postgres -c "CREATE DATABASE \$COMMUNITY_DB_NAME;"
-                      echo "✅ 数据库创建成功"
+                      echo "✅ Database created successfully"
                     fi
                     
-                    # 检查用户是否已存在，如果不存在则创建
-                    echo "检查用户是否已存在: \$COMMUNITY_DB_USERNAME"
+                    # Check if user exists, create if not
+                    echo "Checking if user exists: \$COMMUNITY_DB_USERNAME"
                     if psql -d postgres -c "SELECT 1 FROM pg_roles WHERE rolname='\$COMMUNITY_DB_USERNAME'" | grep -q "1"; then
-                      echo "✅ 用户 \$COMMUNITY_DB_USERNAME 已存在，跳过创建"
+                      echo "✅ User \$COMMUNITY_DB_USERNAME already exists, skipping creation"
                     else
-                      echo "创建用户: \$COMMUNITY_DB_USERNAME"
+                      echo "Creating user: \$COMMUNITY_DB_USERNAME"
                       psql -d postgres -c "CREATE USER \$COMMUNITY_DB_USERNAME WITH PASSWORD '\$COMMUNITY_DB_PASSWORD';"
-                      echo "✅ 用户创建成功"
+                      echo "✅ User created successfully"
                     fi
                     
-                    # 授予权限
-                    echo "授予权限..."
+                    # Grant privileges
+                    echo "Granting privileges..."
                     psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \$COMMUNITY_DB_NAME TO \$COMMUNITY_DB_USERNAME;"
                     
-                    echo "✅ Community 数据库设置完成"
+                    echo "✅ Community database setup completed"
                 restartPolicy: Never
             backoffLimit: 2
           EOF
           
-          echo "⏳ 等待 Community 数据库创建 Job 完成..."
+          echo "⏳ Waiting for Community database creation job to complete..."
           if kubectl wait --for=condition=complete job/community-db-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community 数据库创建成功"
+            echo "✅ Community database creation successful"
             kubectl delete job community-db-setup -n ${{ env.NAMESPACE }}
           else
-            echo "❌ Community 数据库创建失败"
+            echo "❌ Community database creation failed"
             kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }}
             exit 1
           fi
 
       - name: 🗃 Create Community Database Tables
         run: |
-          echo "=== 创建 Community 数据库表结构 ==="
+          echo "🗃 Creating Community database tables..."
           
           # 创建 Kubernetes Job 来执行表结构创建
           cat <<EOF | kubectl apply -f -
@@ -440,22 +552,22 @@ jobs:
                   - -c
                   - |
                     set -e
-                    echo "🔄 开始创建 Community 数据库表结构..."
+                    echo "🔄 Starting Community database table structure creation..."
                     
-                    # 等待数据库可用
-                    echo "⏳ 等待数据库可用..."
+                    # Wait for database to be available
+                    echo "⏳ Waiting for database to be available..."
                     for i in \$(seq 1 30); do
                       if psql -c "\q" 2>/dev/null; then
-                        echo "✅ 数据库连接成功"
+                        echo "✅ Database connection successful"
                         break
                       else
-                        echo "⏳ 尝试 \$i: 数据库连接失败，等待 10 秒..."
+                        echo "⏳ Attempt \$i: Database connection failed, waiting 10 seconds..."
                         sleep 10
                       fi
                     done
                     
-                    # 执行 SQL 语句创建表结构
-                    echo "创建表结构..."
+                    # Execute SQL to create table structure
+                    echo "Creating table structure..."
                     psql -c "
                     -- Enable extensions
                     CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -563,31 +675,31 @@ jobs:
                         EXECUTE FUNCTION update_updated_at_column();
 
                     -- 验证表创建
-                    SELECT '✅ 表结构创建完成' as status;
+                    SELECT '✅ Table structure creation completed' as status;
                     "
 
-                    echo "✅ Community 数据库表结构创建完成"
+                    echo "✅ Community database table structure creation completed"
                 restartPolicy: Never
             backoffLimit: 2
           EOF
           
-          echo "⏳ 等待 Community 数据库表结构创建 Job 完成..."
+          echo "⏳ Waiting for Community database table structure creation job to complete..."
           if kubectl wait --for=condition=complete job/community-schema-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community 数据库表结构创建成功"
+            echo "✅ Community database table structure creation successful"
             kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }}
           else
-            echo "❌ Community 数据库表结构创建失败"
+            echo "❌ Community database table structure creation failed"
             kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }}
             exit 1
           fi
 
       - name: ✅ Verify Database Configuration
         run: |
-          echo "✅ 数据库配置完成"
-          echo "📊 数据库状态:"
-          echo "   ✅ 主数据库迁移: 完成"
-          echo "   ✅ Community 数据库: 创建完成"
-          echo "   ✅ Community 表结构: 创建完成"
+          echo "✅ Database configuration completed"
+          echo "📊 Database Status:"
+          echo "   ✅ Main database migration: Completed"
+          echo "   ✅ Community database: Created"
+          echo "   ✅ Community table structure: Created"
 
   deploy-frontend:
     name: "Deploy Frontend Service to EKS"
@@ -612,14 +724,17 @@ jobs:
 
       - name: ☸️ Update kubeconfig
         run: |
+          echo "🔧 Updating kubeconfig for EKS cluster"
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
       - name: 🧰 Setup kubectl
         run: |
+          echo "🔧 Installing kubectl..."
           sudo snap install kubectl --classic
 
       - name: 🔧 Install envsubst
         run: |
+          echo "🔧 Installing envsubst..."
           sudo apt-get update
           sudo apt-get install -y gettext-base
 
@@ -628,16 +743,22 @@ jobs:
           ALB_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
           FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
           
+          echo "🔧 Updating service account role ARNs..."
+          echo "ALB Role ARN: $ALB_ROLE_ARN"
+          echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
+          
           sed -i "s|ALB_ROLE_ARN_PLACEHOLDER|$ALB_ROLE_ARN|g" k8s/service-accounts/alb-service-account.yaml
           sed -i "s|FRONTEND_ROLE_ARN_PLACEHOLDER|$FRONTEND_ROLE_ARN|g" k8s/service-accounts/frontend-service-account.yaml
 
       - name: 🔧 Apply ALB Controller ServiceAccount
         run: |
+          echo "🔧 Applying ALB controller service account..."
           kubectl delete serviceaccount aws-load-balancer-controller -n kube-system --ignore-not-found=true
           kubectl apply -f k8s/service-accounts/alb-service-account.yaml
 
       - name: 🔄 Restart ALB Controller
         run: |
+          echo "🔄 Restarting ALB controller..."
           kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
           kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=300s
 
@@ -646,12 +767,14 @@ jobs:
           export S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           export AWS_REGION="${{ env.AWS_REGION }}"
           
+          echo "🔧 Updating frontend secrets..."
           envsubst < k8s/configs/s3-secret.yaml > k8s/configs/s3-secret.yaml.tmp
           mv k8s/configs/s3-secret.yaml.tmp k8s/configs/s3-secret.yaml
 
       - name: 🚀 Deploy Frontend Resources
         run: |
           cd k8s
+          echo "🚀 Deploying frontend resources..."
           kubectl apply -f namespaces/comic-website.yaml
           kubectl apply -f service-accounts/alb-service-account.yaml
           kubectl apply -f service-accounts/frontend-service-account.yaml
@@ -664,27 +787,34 @@ jobs:
       - name: 🚀 Deploy Frontend Application
         run: |
           cd k8s
+          echo "🚀 Deploying frontend application..."
           if kubectl get deployment frontend-deployment -n ${{ env.NAMESPACE }} &> /dev/null; then
+            echo "🔄 Replacing existing frontend deployment"
             kubectl replace -f deployments/frontend-deployment.yaml -n ${{ env.NAMESPACE }} --force
           else
+            echo "📦 Creating new frontend deployment"
             kubectl apply -f deployments/frontend-deployment.yaml -n ${{ env.NAMESPACE }}
           fi
 
       - name: 🔄 Update Frontend Image
         run: |
           FRONTEND_IMAGE="${{ needs.build-images.outputs.frontend_image }}"
+          echo "🔄 Updating frontend image to: $FRONTEND_IMAGE"
           
           kubectl patch deployment frontend-deployment -n ${{ env.NAMESPACE }} \
             -p='{"spec":{"template":{"spec":{"containers":[{"name":"frontend","image":"'"$FRONTEND_IMAGE"'"}]}}}}'
 
       - name: ⏳ Wait for Frontend Deployment
         run: |
+          echo "⏳ Waiting for frontend deployment to complete..."
           kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=180s
 
       - name: ✅ Verify Frontend Service
         run: |
           echo "✅ Frontend service deployed successfully"
+          echo "📊 Frontend Deployment Status:"
           kubectl get deployment frontend-deployment -n ${{ env.NAMESPACE }}
+          echo "📊 Frontend Service Status:"
           kubectl get service frontend-service -n ${{ env.NAMESPACE }}
 
   deploy-backend:
@@ -711,20 +841,24 @@ jobs:
 
       - name: ☸️ Update kubeconfig
         run: |
+          echo "🔧 Updating kubeconfig for EKS cluster"
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
       - name: 🧰 Setup kubectl
         run: |
+          echo "🔧 Installing kubectl..."
           sudo snap install kubectl --classic
 
       - name: 🔧 Update Backend Service Account Role ARN
         run: |
           BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
+          echo "🔧 Updating backend service account role ARN: $BACKEND_ROLE_ARN"
           sed -i "s|BACKEND_ROLE_ARN_PLACEHOLDER|$BACKEND_ROLE_ARN|g" k8s/service-accounts/backend-service-account.yaml
 
       - name: 🚀 Deploy Backend Resources
         run: |
           cd k8s
+          echo "🚀 Deploying backend resources..."
           kubectl apply -f service-accounts/backend-service-account.yaml
           kubectl apply -f configs/backend-config.yaml
           kubectl apply -f service/backend-service.yaml
@@ -732,27 +866,34 @@ jobs:
       - name: 🚀 Deploy Backend Application
         run: |
           cd k8s
+          echo "🚀 Deploying backend application..."
           if kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} &> /dev/null; then
+            echo "🔄 Replacing existing backend deployment"
             kubectl replace -f deployments/backend-deployment.yaml -n ${{ env.NAMESPACE }} --force
           else
+            echo "📦 Creating new backend deployment"
             kubectl apply -f deployments/backend-deployment.yaml -n ${{ env.NAMESPACE }}
           fi
 
       - name: 🔄 Update Backend Image
         run: |
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
+          echo "🔄 Updating backend image to: $BACKEND_IMAGE"
           
           kubectl patch deployment backend-deployment -n ${{ env.NAMESPACE }} \
             -p='{"spec":{"template":{"spec":{"containers":[{"name":"backend","image":"'"$BACKEND_IMAGE"'"}]}}}}'
 
       - name: ⏳ Wait for Backend Deployment
         run: |
+          echo "⏳ Waiting for backend deployment to complete..."
           kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
 
       - name: ✅ Verify Backend Service
         run: |
           echo "✅ Backend service deployed successfully"
+          echo "📊 Backend Deployment Status:"
           kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }}
+          echo "📊 Backend Service Status:"
           kubectl get service backend-service -n ${{ env.NAMESPACE }}
 
   deploy-community:
@@ -779,20 +920,24 @@ jobs:
 
       - name: ☸️ Update kubeconfig
         run: |
+          echo "🔧 Updating kubeconfig for EKS cluster"
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
       - name: 🧰 Setup kubectl
         run: |
+          echo "🔧 Installing kubectl..."
           sudo snap install kubectl --classic
 
       - name: 🔧 Install envsubst
         run: |
+          echo "🔧 Installing envsubst..."
           sudo apt-get update
           sudo apt-get install -y gettext-base
 
       - name: 🔧 Update Community Service Account Role ARN
         run: |
           COMMUNITY_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.community_role_arn }}"
+          echo "🔧 Updating community service account role ARN: $COMMUNITY_ROLE_ARN"
           sed -i "s|COMMUNITY_ROLE_ARN_PLACEHOLDER|$COMMUNITY_ROLE_ARN|g" k8s/service-accounts/community-service-account.yaml
 
       - name: 🔧 Update Community Secrets
@@ -815,12 +960,14 @@ jobs:
           export REDIS_PORT="${{ needs.terraform-infrastructure.outputs.redis_port }}"
           export REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}"
           
+          echo "🔧 Updating community secrets..."
           envsubst < k8s/configs/community-secret.yaml > k8s/configs/community-secret.yaml.tmp
           mv k8s/configs/community-secret.yaml.tmp k8s/configs/community-secret.yaml
 
       - name: 🚀 Deploy Community Resources
         run: |
           cd k8s
+          echo "🚀 Deploying community resources..."
           kubectl apply -f service-accounts/community-service-account.yaml
           kubectl apply -f configs/community-configmap.yaml
           kubectl apply -f configs/community-secret.yaml
@@ -829,38 +976,48 @@ jobs:
       - name: 🚀 Deploy Community Application
         run: |
           cd k8s
+          echo "🚀 Deploying community application..."
           if kubectl get deployment community-deployment -n ${{ env.NAMESPACE }} &> /dev/null; then
+            echo "🔄 Replacing existing community deployment"
             kubectl replace -f deployments/community-deployment.yaml -n ${{ env.NAMESPACE }} --force
           else
+            echo "📦 Creating new community deployment"
             kubectl apply -f deployments/community-deployment.yaml -n ${{ env.NAMESPACE }}
           fi
 
       - name: 🔄 Update Community Image
         run: |
           COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
+          echo "🔄 Updating community image to: $COMMUNITY_IMAGE"
           
           kubectl patch deployment community-deployment -n ${{ env.NAMESPACE }} \
             -p='{"spec":{"template":{"spec":{"containers":[{"name":"community-service","image":"'"$COMMUNITY_IMAGE"'"}]}}}}'
 
       - name: ⏳ Wait for Community Deployment
         run: |
+          echo "⏳ Waiting for community deployment to complete..."
           kubectl rollout status deployment/community-deployment -n ${{ env.NAMESPACE }} --timeout=180s
 
       - name: ✅ Verify Community Service
         run: |
           echo "✅ Community service deployed successfully"
+          echo "📊 Community Deployment Status:"
           kubectl get deployment community-deployment -n ${{ env.NAMESPACE }}
+          echo "📊 Community Service Status:"
           kubectl get service community-service -n ${{ env.NAMESPACE }}
 
       - name: 🌐 Get ALB URL
         id: get-alb-url
         run: |
+          echo "🌐 Getting ALB URL..."
           for i in {1..15}; do
             ALB_HOSTNAME=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB_HOSTNAME" ]; then
+              echo "✅ ALB URL found: http://$ALB_HOSTNAME"
               echo "alb_url=http://$ALB_HOSTNAME" >> $GITHUB_OUTPUT
               break
             else
+              echo "⏳ Attempt $i: ALB not ready yet, waiting 20 seconds..."
               sleep 20
             fi
           done
