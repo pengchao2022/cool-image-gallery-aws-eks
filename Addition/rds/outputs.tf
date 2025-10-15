@@ -63,26 +63,3 @@ output "db_connection_string" {
   value       = "postgresql://${aws_db_instance.main.username}@${aws_db_instance.main.endpoint}/${aws_db_instance.main.db_name}"
   sensitive   = true
 }
-
-# Community Database Outputs
-output "community_database_name" {
-  description = "Name of the community database"
-  value       = try(postgresql_database.communitydb.name, var.community_db_name)
-}
-
-output "community_database_username" {
-  description = "Username for community database"
-  value       = try(postgresql_role.community_user.name, var.community_db_username)
-  sensitive   = false
-}
-
-output "community_database_url" {
-  description = "Connection URL for community database"
-  value       = "postgresql://${try(postgresql_role.community_user.name, var.community_db_username)}:${var.community_db_password}@${aws_db_instance.main.endpoint}/${try(postgresql_database.communitydb.name, var.community_db_name)}"
-  sensitive   = true
-}
-
-output "all_databases" {
-  description = "List of all databases in RDS instance"
-  value       = [var.database_name, try(postgresql_database.communitydb.name, var.community_db_name)]
-}

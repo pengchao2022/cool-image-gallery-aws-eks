@@ -119,21 +119,3 @@ variable "common_tags" {
     ManagedBy   = "terraform"
   }
 }
-
-variable "community_db_name" {
-  description = "Name for the community database"
-  type        = string
-  default     = "communitydb"
-}
-
-variable "community_db_username" {
-  description = "Username for community database access"
-  type        = string
-  default     = "community_user"
-}
-
-variable "community_db_password" {
-  description = "Password for community database user"
-  type        = string
-  sensitive   = true
-}

@@ -31,6 +31,9 @@ jobs:
       backend_role_arn: ${{ steps.terraform-outputs.outputs.backend_role_arn }}
       frontend_role_arn: ${{ steps.terraform-outputs.outputs.frontend_role_arn }}
       alb_url: ${{ steps.terraform-outputs.outputs.alb_url }}
+      # 新增 Community 数据库输出
+      community_database_name: ${{ steps.terraform-outputs.outputs.community_database_name }}
+      community_database_username: ${{ steps.terraform-outputs.outputs.community_database_username }}
 
     steps:
       - name: 🧩 Checkout code
@@ -70,7 +73,10 @@ jobs:
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
-            -var="db_password=${{ secrets.DB_PASSWORD }}"
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="community_db_password=${{ secrets.COMMUNITY_DB_PASSWORD }}" \
+            -var="community_db_username=${{ secrets.COMMUNITY_DB_USERNAME }}" \
+            -var="community_db_name=${{ secrets.COMMUNITY_DB_NAME }}"
           terraform apply -auto-approve tfplan
 
       - name: 📋 Get Terraform Outputs
@@ -92,6 +98,10 @@ jobs:
           FRONTEND_ROLE_ARN=$(jq -r '.frontend_role_arn.value // empty' outputs.json)
           ALB_URL=$(jq -r '.alb_url.value // empty' outputs.json)
           
+          # 新增 Community 数据库输出
+          COMMUNITY_DB_NAME=$(jq -r '.community_database_name.value // "communitydb"' outputs.json)
+          COMMUNITY_DB_USERNAME=$(jq -r '.community_database_username.value // "community_user"' outputs.json)
+          
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "rds_endpoint=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
@@ -104,6 +114,10 @@ jobs:
           echo "backend_role_arn=$BACKEND_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "frontend_role_arn=$FRONTEND_ROLE_ARN" >> $GITHUB_OUTPUT
           echo "alb_url=$ALB_URL" >> $GITHUB_OUTPUT
+          
+          # 新增 Community 数据库输出
+          echo "community_database_name=$COMMUNITY_DB_NAME" >> $GITHUB_OUTPUT
+          echo "community_database_username=$COMMUNITY_DB_USERNAME" >> $GITHUB_OUTPUT
 
           # 显示 Terraform 输出的重要信息
           echo "=== Terraform Outputs ==="
@@ -112,6 +126,8 @@ jobs:
           echo "RDS Endpoint: $RDS_ENDPOINT"
           echo "S3 Bucket: $S3_BUCKET_NAME"
           echo "ALB URL: $ALB_URL"
+          echo "Community Database: $COMMUNITY_DB_NAME"
+          echo "Community Database Username: $COMMUNITY_DB_USERNAME"
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -267,6 +283,11 @@ jobs:
           export S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           export AWS_REGION="${{ env.AWS_REGION }}"
           
+          # 新增 Community 数据库环境变量
+          export COMMUNITY_DB_NAME="${{ needs.terraform-infrastructure.outputs.community_database_name }}"
+          export COMMUNITY_DB_USERNAME="${{ needs.terraform-infrastructure.outputs.community_database_username }}"
+          export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
+          
           envsubst < k8s/configs/rds-secret.yaml > k8s/configs/rds-secret.yaml.tmp
           mv k8s/configs/rds-secret.yaml.tmp k8s/configs/rds-secret.yaml
           
@@ -275,6 +296,8 @@ jobs:
           
           envsubst < k8s/configs/s3-secret.yaml > k8s/configs/s3-secret.yaml.tmp
           mv k8s/configs/s3-secret.yaml.tmp k8s/configs/s3-secret.yaml
+
+          echo "✅ Kubernetes secrets updated with Community database information"
 
       - name: 🚀 Deploy Resources (excluding Deployments)
         run: |
@@ -449,5 +472,6 @@ jobs:
           echo "   - Cluster: ${{ env.CLUSTER_NAME }}"
           echo "   - Namespace: ${{ env.NAMESPACE }}"
           echo "   - Region: ${{ env.AWS_REGION }}"
+          echo "   - Community Database: ${{ needs.terraform-infrastructure.outputs.community_database_name }}"
           echo ""
           echo "================================================"
