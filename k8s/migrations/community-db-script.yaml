@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: community-db-setup
+  namespace: comic-website
+spec:
+  template:
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:14
+        env:
+        - name: RDS_HOST
+          value: "PLACEHOLDER_RDS_HOST"
+        - name: MAIN_DB_USERNAME
+          value: "PLACEHOLDER_MAIN_DB_USERNAME"
+        - name: MAIN_DB_PASSWORD
+          value: "PLACEHOLDER_MAIN_DB_PASSWORD"
+        - name: COMMUNITY_DB_NAME
+          value: "PLACEHOLDER_COMMUNITY_DB_NAME"
+        - name: COMMUNITY_DB_USERNAME
+          value: "PLACEHOLDER_COMMUNITY_DB_USERNAME"
+        - name: COMMUNITY_DB_PASSWORD
+          value: "PLACEHOLDER_COMMUNITY_DB_PASSWORD"
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # 创建数据库
+          PGPASSWORD="$MAIN_DB_PASSWORD" psql -h "$RDS_HOST" -p 5432 -U "$MAIN_DB_USERNAME" -d postgres -c "CREATE DATABASE \"$COMMUNITY_DB_NAME\";" || echo "Database exists"
+          # 创建用户
+          PGPASSWORD="$MAIN_DB_PASSWORD" psql -h "$RDS_HOST" -p 5432 -U "$MAIN_DB_USERNAME" -d postgres -c "CREATE USER \"$COMMUNITY_DB_USERNAME\" WITH PASSWORD '$COMMUNITY_DB_PASSWORD';" || echo "User exists"
+          # 授予权限
+          PGPASSWORD="$MAIN_DB_PASSWORD" psql -h "$RDS_HOST" -p 5432 -U "$MAIN_DB_USERNAME" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$COMMUNITY_DB_NAME\" TO \"$COMMUNITY_DB_USERNAME\";"
+          echo "✅ Community database setup completed!"
+      restartPolicy: Never
+  backoffLimit: 2

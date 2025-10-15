@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: community-config
+  namespace: comic-website
+data:
+  node_env: "production"
+  port: "3002"
+  frontend_url: "https://your-frontend-domain.com"
+  log_level: "info"
+  cors_origin: "https://your-frontend-domain.com"
