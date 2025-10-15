@@ -235,10 +235,10 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔧 Install envsubst
+      - name: 🔧 Install envsubst and postgresql-client
         run: |
           sudo apt-get update
-          sudo apt-get install -y gettext-base
+          sudo apt-get install -y gettext-base postgresql-client
 
       - name: 🔧 Update Service Account Role ARNs
         run: |
@@ -266,6 +266,49 @@ jobs:
           kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=300s
           
           echo "✅ ALB Controller restarted successfully"
+
+      - name: 🗃 Create Community Database
+        run: |
+          echo "🔄 Creating community database..."
+          
+          # 设置环境变量
+          export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
+          export COMMUNITY_DB_NAME="${{ needs.terraform-infrastructure.outputs.community_database_name }}"
+          export COMMUNITY_DB_USERNAME="${{ needs.terraform-infrastructure.outputs.community_database_username }}"
+          export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
+          
+          echo "RDS Endpoint: $RDS_ENDPOINT"
+          echo "Community DB Name: $COMMUNITY_DB_NAME"
+          echo "Community DB Username: $COMMUNITY_DB_USERNAME"
+          
+          # 等待 RDS 可用
+          echo "⏳ Waiting for RDS to be available..."
+          for i in {1..30}; do
+            if PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$RDS_USERNAME" -d postgres -c "\q" 2>/dev/null; then
+              echo "✅ RDS is available"
+              break
+            else
+              echo "⏳ Attempt $i: RDS not ready yet, waiting 10 seconds..."
+              sleep 10
+            fi
+          done
+          
+          # 创建 community 数据库
+          echo "Creating database: $COMMUNITY_DB_NAME"
+          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$RDS_USERNAME" -d postgres -c "CREATE DATABASE IF NOT EXISTS $COMMUNITY_DB_NAME;"
+          
+          # 创建用户并授予权限
+          echo "Creating user: $COMMUNITY_DB_USERNAME"
+          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$RDS_USERNAME" -d postgres -c "CREATE USER $COMMUNITY_DB_USERNAME WITH PASSWORD '$COMMUNITY_DB_PASSWORD';" 2>/dev/null || echo "User might already exist, continuing..."
+          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$RDS_USERNAME" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE $COMMUNITY_DB_NAME TO $COMMUNITY_DB_USERNAME;"
+          
+          # 验证数据库创建
+          echo "Verifying database creation..."
+          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$RDS_USERNAME" -d postgres -c "\l" | grep "$COMMUNITY_DB_NAME" || echo "Database verification completed"
+          
+          echo "✅ Community database setup completed"
 
       - name: 🗃 Create Namespace
         run: |

@@ -120,6 +120,7 @@ variable "common_tags" {
   }
 }
 
+# Community Database Variables (用于输出)
 variable "community_db_name" {
   description = "Name for the community database"
   type        = string
