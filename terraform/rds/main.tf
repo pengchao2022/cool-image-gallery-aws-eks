@@ -157,90 +157,70 @@ resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
 # Additional Databases Configuration
 # ==============================================================================
 
-# PostgreSQL Provider for managing databases within RDS instance
-provider "postgresql" {
-  alias = "rds"
-
-  host            = aws_db_instance.main.address
-  port            = aws_db_instance.main.port
-  database        = "postgres"
-  username        = aws_db_instance.main.username
-  password        = var.password
-  sslmode         = "require"
-  connect_timeout = 15
-  superuser       = false
-
-  # Wait for RDS instance to be fully available
-  depends_on = [aws_db_instance.main]
-}
-
-# Community Database User
-resource "postgresql_role" "community_user" {
-  provider = postgresql.rds
-
-  name     = var.community_db_username
-  login    = true
-  password = var.community_db_password
-  inherit  = true
-  roles    = [aws_db_instance.main.username]
-
-  depends_on = [aws_db_instance.main]
-}
-
 # Community Database
 resource "postgresql_database" "communitydb" {
-  provider = postgresql.rds
-
   name              = var.community_db_name
-  owner             = postgresql_role.community_user.name
+  owner             = aws_db_instance.main.username
   template          = "template0"
   encoding          = "UTF8"
   lc_collate        = "en_US.UTF-8"
   lc_ctype          = "en_US.UTF-8"
   allow_connections = true
 
-  depends_on = [postgresql_role.community_user]
+  # 使用 connection 块来配置连接
+  connection {
+    type     = "postgresql"
+    host     = aws_db_instance.main.address
+    port     = aws_db_instance.main.port
+    database = "postgres"
+    username = aws_db_instance.main.username
+    password = var.password
+    sslmode  = "require"
+    timeout  = 15
+  }
+
+  # 显式依赖 RDS 实例
+  depends_on = [aws_db_instance.main]
+}
+
+# Community Database User
+resource "postgresql_role" "community_user" {
+  name     = var.community_db_username
+  login    = true
+  password = var.community_db_password
+  inherit  = true
+
+  connection {
+    type     = "postgresql"
+    host     = aws_db_instance.main.address
+    port     = aws_db_instance.main.port
+    database = "postgres"
+    username = aws_db_instance.main.username
+    password = var.password
+    sslmode  = "require"
+    timeout  = 15
+  }
+
+  depends_on = [aws_db_instance.main]
 }
 
 # Grant permissions to community user
 resource "postgresql_grant" "communitydb_privileges" {
-  provider = postgresql.rds
-
   database    = postgresql_database.communitydb.name
   role        = postgresql_role.community_user.name
   object_type = "database"
   privileges  = ["CREATE", "CONNECT", "TEMPORARY"]
-}
 
-# Grant schema permissions
-resource "postgresql_grant" "communitydb_schema" {
-  provider = postgresql.rds
+  connection {
+    type     = "postgresql"
+    host     = aws_db_instance.main.address
+    port     = aws_db_instance.main.port
+    database = "postgres"
+    username = aws_db_instance.main.username
+    password = var.password
+    sslmode  = "require"
+    timeout  = 15
+  }
 
-  database    = postgresql_database.communitydb.name
-  role        = postgresql_role.community_user.name
-  schema      = "public"
-  object_type = "schema"
-  privileges  = ["USAGE", "CREATE"]
-}
-
-# Grant table permissions
-resource "postgresql_grant" "communitydb_tables" {
-  provider = postgresql.rds
-
-  database    = postgresql_database.communitydb.name
-  role        = postgresql_role.community_user.name
-  schema      = "public"
-  object_type = "table"
-  privileges  = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]
-}
-
-# Grant sequence permissions
-resource "postgresql_grant" "communitydb_sequences" {
-  provider = postgresql.rds
-
-  database    = postgresql_database.communitydb.name
-  role        = postgresql_role.community_user.name
-  schema      = "public"
-  object_type = "sequence"
-  privileges  = ["USAGE", "SELECT", "UPDATE"]
+  depends_on = [postgresql_database.communitydb, postgresql_role.community_user]
 }
