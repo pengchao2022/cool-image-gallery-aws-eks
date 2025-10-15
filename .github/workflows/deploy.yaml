@@ -297,6 +297,21 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
+      - name: 🔍 Debug Migration Issue
+        run: |
+          echo "=== 检查本地文件结构 ==="
+          find . -name "migrate.js" -type f
+          echo ""
+          echo "=== 检查 backend 目录结构 ==="
+          cd backend
+          ls -la
+          echo ""
+          echo "=== 检查 scripts 文件夹 ==="
+          ls -la scripts/
+          echo ""
+          echo "=== 检查 Dockerfile ==="
+          cat Dockerfile
+
       - name: 🗃 Create Namespace
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
