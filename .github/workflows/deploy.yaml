@@ -362,13 +362,28 @@ jobs:
                       fi
                     done
                     
-                    # 创建 community 数据库
-                    echo "创建数据库: \$COMMUNITY_DB_NAME"
-                    psql -d postgres -c "CREATE DATABASE IF NOT EXISTS \$COMMUNITY_DB_NAME;"
+                    # 检查数据库是否已存在，如果不存在则创建
+                    echo "检查数据库是否已存在: \$COMMUNITY_DB_NAME"
+                    if psql -d postgres -c "\l" | grep -q "\$COMMUNITY_DB_NAME"; then
+                      echo "✅ 数据库 \$COMMUNITY_DB_NAME 已存在，跳过创建"
+                    else
+                      echo "创建数据库: \$COMMUNITY_DB_NAME"
+                      psql -d postgres -c "CREATE DATABASE \$COMMUNITY_DB_NAME;"
+                      echo "✅ 数据库创建成功"
+                    fi
                     
-                    # 创建用户并授予权限
-                    echo "创建用户: \$COMMUNITY_DB_USERNAME"
-                    psql -d postgres -c "CREATE USER \$COMMUNITY_DB_USERNAME WITH PASSWORD '\$COMMUNITY_DB_PASSWORD';" 2>/dev/null || echo "用户可能已存在，继续..."
+                    # 检查用户是否已存在，如果不存在则创建
+                    echo "检查用户是否已存在: \$COMMUNITY_DB_USERNAME"
+                    if psql -d postgres -c "SELECT 1 FROM pg_roles WHERE rolname='\$COMMUNITY_DB_USERNAME'" | grep -q "1"; then
+                      echo "✅ 用户 \$COMMUNITY_DB_USERNAME 已存在，跳过创建"
+                    else
+                      echo "创建用户: \$COMMUNITY_DB_USERNAME"
+                      psql -d postgres -c "CREATE USER \$COMMUNITY_DB_USERNAME WITH PASSWORD '\$COMMUNITY_DB_PASSWORD';"
+                      echo "✅ 用户创建成功"
+                    fi
+                    
+                    # 授予权限
+                    echo "授予权限..."
                     psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \$COMMUNITY_DB_NAME TO \$COMMUNITY_DB_USERNAME;"
                     
                     # 验证数据库创建
