@@ -243,6 +243,9 @@ jobs:
           echo ""
           echo "4. 查找 community-migration.sql 文件:"
           docker run --rm $BACKEND_IMAGE find /app -name "community-migration.sql" -type f 2>/dev/null || echo "community-migration.sql 文件不存在"
+          echo ""
+          echo "5. 尝试运行 migrate.js:"
+          docker run --rm $BACKEND_IMAGE node -e "console.log('Node.js working'); try { require('fs').accessSync('/app/scripts/migrate.js'); console.log('migrate.js exists') } catch(e) { console.log('migrate.js missing:', e.message) }" || echo "无法运行 Node.js 检查"
           
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
@@ -354,13 +357,38 @@ jobs:
           echo "🚀 Running main database migration..."
           kubectl apply -f k8s/migrations/db-migration-job.yaml
           
+          echo "获取迁移 Pod 信息..."
+          kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
+          
+          # 等待一段时间让 Pod 启动
+          sleep 30
+          
+          # 获取 Pod 名称
+          POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
+          
+          if [ "$POD_NAME" != "not-found" ]; then
+            echo "迁移 Pod 名称: $POD_NAME"
+            echo "=== Pod 状态 ==="
+            kubectl describe pod $POD_NAME -n ${{ env.NAMESPACE }}
+            echo ""
+            echo "=== Pod 日志 ==="
+            kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --tail=50
+          else
+            echo "❌ 无法找到迁移 Pod"
+          fi
+          
           echo "Waiting for database migration to complete..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             echo "✅ Database migration successful"
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
             echo "❌ Database migration failed"
-            kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=50
+            # 再次获取日志
+            POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
+            if [ "$POD_NAME" != "not-found" ]; then
+              echo "=== 最终 Pod 日志 ==="
+              kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --tail=100
+            fi
             exit 1
           fi
 
