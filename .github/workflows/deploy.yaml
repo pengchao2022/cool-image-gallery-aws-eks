@@ -169,38 +169,25 @@ jobs:
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
           ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
           echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
-          echo "=== 调试: AWS 账户信息 ==="
-          echo "Account ID: $ACCOUNT_ID"
-          echo "ECR Registry: $ECR_REGISTRY"
 
       - name: 🔐 Login to ECR
         run: |
-          echo "=== 调试: 开始 ECR 登录 ==="
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
-          echo "=== ECR 登录完成 ==="
 
       - name: 🔍 Set ECR URLs
         run: |
           echo "BACKEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}" >> $GITHUB_ENV
           echo "FRONTEND_ECR_URL=${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}" >> $GITHUB_ENV
-          echo "=== 调试: ECR URLs ==="
-          echo "Backend ECR URL: ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
-          echo "Frontend ECR URL: ${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
 
       - name: 🏗 Check if Backend Image Exists
         id: check-backend
         run: |
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          echo "=== 调试: 检查后端镜像 ==="
-          echo "Image Tag: $IMAGE_TAG"
-          echo "Backend Image: $BACKEND_IMAGE"
           if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
-            echo "✅ 镜像已存在"
             echo "image_exists=true" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
           else
-            echo "🔄 镜像不存在，需要构建"
             echo "image_exists=false" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
           fi
@@ -212,12 +199,10 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          echo "=== 调试: 构建后端镜像 ==="
           echo "Building and pushing backend image: $BACKEND_IMAGE"
           docker build -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
-          echo "✅ 后端镜像构建完成"
 
       - name: 🎨 Build Frontend Image
         id: build-frontend
@@ -225,12 +210,10 @@ jobs:
           cd frontend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
-          echo "=== 调试: 构建前端镜像 ==="
           echo "Building and pushing frontend image: $FRONTEND_IMAGE"
           docker build -t $FRONTEND_IMAGE .
           docker push $FRONTEND_IMAGE
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
-          echo "✅ 前端镜像构建完成"
 
   deploy-applications:
     name: "Deploy Applications to EKS"
@@ -254,137 +237,43 @@ jobs:
 
       - name: ☸️ Update kubeconfig
         run: |
-          echo "=== 调试: 更新 kubeconfig ==="
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-          echo "✅ kubeconfig 更新完成"
 
       - name: 🧰 Setup kubectl
         run: |
-          echo "=== 调试: 安装 kubectl ==="
           sudo snap install kubectl --classic
-          kubectl version --client
-          echo "✅ kubectl 安装完成"
 
-      - name: 🔧 Install envsubst and postgresql-client
+      - name: 🔧 Install envsubst
         run: |
-          echo "=== 调试: 安装必要工具 ==="
           sudo apt-get update
-          sudo apt-get install -y gettext-base postgresql-client
-          echo "envsubst 版本:"
-          envsubst --version
-          echo "psql 版本:"
-          psql --version
-          echo "✅ 工具安装完成"
+          sudo apt-get install -y gettext-base
 
       - name: 🔧 Update Service Account Role ARNs
         run: |
-          echo "=== 调试: 更新 Service Account Role ARNs ==="
           ALB_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.alb_controller_role_arn }}"
           BACKEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.backend_role_arn }}"
           FRONTEND_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.frontend_role_arn }}"
           
-          echo "ALB Role ARN: $ALB_ROLE_ARN"
-          echo "Backend Role ARN: $BACKEND_ROLE_ARN"
-          echo "Frontend Role ARN: $FRONTEND_ROLE_ARN"
-          
           sed -i "s|ALB_ROLE_ARN_PLACEHOLDER|$ALB_ROLE_ARN|g" k8s/service-accounts/alb-service-account.yaml
           sed -i "s|BACKEND_ROLE_ARN_PLACEHOLDER|$BACKEND_ROLE_ARN|g" k8s/service-accounts/backend-service-account.yaml
           sed -i "s|FRONTEND_ROLE_ARN_PLACEHOLDER|$FRONTEND_ROLE_ARN|g" k8s/service-accounts/frontend-service-account.yaml
-          echo "✅ Service Account Role ARNs 更新完成"
 
       - name: 🔧 Apply ALB Controller ServiceAccount
         run: |
-          echo "=== 调试: 应用 ALB Controller ServiceAccount ==="
           kubectl delete serviceaccount aws-load-balancer-controller -n kube-system --ignore-not-found=true
           kubectl apply -f k8s/service-accounts/alb-service-account.yaml
-          echo "✅ ALB Controller ServiceAccount 应用完成"
 
       - name: 🔄 Restart ALB Controller
         run: |
-          # 重启 ALB Controller
-          echo "🔄 Restarting ALB Controller..."
           kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
-          
-          # 等待部署完成
-          echo "⏳ Waiting for ALB Controller to be ready..."
           kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=300s
-          
-          echo "✅ ALB Controller restarted successfully"
-
-      - name: 🗃 Create Community Database
-        run: |
-          echo "=== 调试: 开始创建 Community 数据库 ==="
-          
-          # 设置环境变量
-          export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          export RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
-          
-          # 使用硬编码值
-          export COMMUNITY_DB_NAME="communitydb"
-          export COMMUNITY_DB_USERNAME="community_user"
-          export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
-          
-          echo "=== 调试: 环境变量 ==="
-          echo "RDS_ENDPOINT: $RDS_ENDPOINT"
-          echo "RDS_PORT: $RDS_PORT"
-          echo "RDS_USERNAME: $RDS_USERNAME"
-          echo "RDS_PASSWORD: [隐藏]"
-          echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
-          echo "COMMUNITY_DB_USERNAME: $COMMUNITY_DB_USERNAME"
-          echo "COMMUNITY_DB_PASSWORD: [隐藏]"
-          
-          # 提取 RDS 主机名（去掉端口号）
-          RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-          echo "=== 调试: 解析后的 RDS 信息 ==="
-          echo "RDS_HOST: $RDS_HOST"
-          echo "RDS_PORT: $RDS_PORT"
-          
-          # 测试网络连接
-          echo "=== 调试: 测试网络连接 ==="
-          ping -c 3 $RDS_HOST || echo "Ping 测试失败，继续..."
-          nc -zv $RDS_HOST $RDS_PORT || echo "端口测试失败，继续..."
-          
-          # 等待 RDS 可用
-          echo "=== 调试: 等待 RDS 可用 ==="
-          for i in {1..30}; do
-            echo "尝试连接 RDS (尝试 $i/30)..."
-            if PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_HOST" -p "$RDS_PORT" -U "$RDS_USERNAME" -d postgres -c "\q" 2>/dev/null; then
-              echo "✅ RDS 连接成功"
-              break
-            else
-              echo "❌ RDS 连接失败，等待 10 秒..."
-              sleep 10
-            fi
-          done
-          
-          # 创建 community 数据库
-          echo "=== 调试: 创建数据库 ==="
-          echo "创建数据库: $COMMUNITY_DB_NAME"
-          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_HOST" -p "$RDS_PORT" -U "$RDS_USERNAME" -d postgres -c "CREATE DATABASE IF NOT EXISTS $COMMUNITY_DB_NAME;"
-          
-          # 创建用户并授予权限
-          echo "=== 调试: 创建用户和权限 ==="
-          echo "创建用户: $COMMUNITY_DB_USERNAME"
-          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_HOST" -p "$RDS_PORT" -U "$RDS_USERNAME" -d postgres -c "CREATE USER $COMMUNITY_DB_USERNAME WITH PASSWORD '$COMMUNITY_DB_PASSWORD';" 2>/dev/null || echo "用户可能已存在，继续..."
-          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_HOST" -p "$RDS_PORT" -U "$RDS_USERNAME" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE $COMMUNITY_DB_NAME TO $COMMUNITY_DB_USERNAME;"
-          
-          # 验证数据库创建
-          echo "=== 调试: 验证数据库创建 ==="
-          PGPASSWORD="$RDS_PASSWORD" psql -h "$RDS_HOST" -p "$RDS_PORT" -U "$RDS_USERNAME" -d postgres -c "\l" | grep "$COMMUNITY_DB_NAME" && echo "✅ 数据库创建验证成功" || echo "⚠️ 数据库创建验证未找到记录"
-          
-          echo "✅ Community 数据库设置完成"
 
       - name: 🗃 Create Namespace
         run: |
-          echo "=== 调试: 创建命名空间 ==="
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
-          echo "✅ 命名空间创建完成"
 
       - name: 🔧 Update Kubernetes Secrets
         run: |
-          echo "=== 调试: 更新 Kubernetes Secrets ==="
           export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
           export RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
@@ -400,15 +289,6 @@ jobs:
           export COMMUNITY_DB_USERNAME="community_user"
           export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
           
-          echo "=== 调试: Secrets 环境变量 ==="
-          echo "RDS_HOST: $RDS_HOST"
-          echo "RDS_PORT: $RDS_PORT"
-          echo "RDS_USERNAME: $RDS_USERNAME"
-          echo "RDS_DATABASE: $RDS_DATABASE"
-          echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
-          echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
-          echo "COMMUNITY_DB_USERNAME: $COMMUNITY_DB_USERNAME"
-          
           envsubst < k8s/configs/rds-secret.yaml > k8s/configs/rds-secret.yaml.tmp
           mv k8s/configs/rds-secret.yaml.tmp k8s/configs/rds-secret.yaml
           
@@ -418,13 +298,9 @@ jobs:
           envsubst < k8s/configs/s3-secret.yaml > k8s/configs/s3-secret.yaml.tmp
           mv k8s/configs/s3-secret.yaml.tmp k8s/configs/s3-secret.yaml
 
-          echo "✅ Kubernetes secrets 更新完成"
-
       - name: 🚀 Deploy Resources (excluding Deployments)
         run: |
-          echo "=== 调试: 部署资源 (除 Deployments 外) ==="
           cd k8s
-          # 应用所有资源，除了 Deployments
           kubectl apply -f namespaces/comic-website.yaml
           kubectl apply -f service-accounts/alb-service-account.yaml
           kubectl apply -f service-accounts/backend-service-account.yaml
@@ -438,158 +314,176 @@ jobs:
           kubectl apply -f service/frontend-service.yaml
           kubectl apply -f networking/alb-ingress-class.yaml
           kubectl apply -f networking/alb-ingress.yaml
-          echo "✅ 资源部署完成"
+
+      - name: 🗃 Create Community Database via Kubernetes Job
+        run: |
+          echo "=== 使用 Kubernetes Job 创建 Community 数据库 ==="
+          
+          # 创建 Kubernetes Job 来执行数据库创建
+          cat <<EOF | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: community-db-setup
+            namespace: ${{ env.NAMESPACE }}
+          spec:
+            template:
+              spec:
+                containers:
+                - name: postgres-client
+                  image: postgres:15-alpine
+                  env:
+                  - name: PGHOST
+                    value: "$(echo "${{ needs.terraform-infrastructure.outputs.rds_endpoint }}" | cut -d':' -f1)"
+                  - name: PGPORT
+                    value: "${{ needs.terraform-infrastructure.outputs.rds_port }}"
+                  - name: PGUSER
+                    value: "${{ needs.terraform-infrastructure.outputs.rds_username }}"
+                  - name: PGPASSWORD
+                    value: "${{ secrets.DB_PASSWORD }}"
+                  - name: COMMUNITY_DB_NAME
+                    value: "communitydb"
+                  - name: COMMUNITY_DB_USERNAME
+                    value: "community_user"
+                  - name: COMMUNITY_DB_PASSWORD
+                    value: "${{ secrets.COMMUNITY_DB_PASSWORD }}"
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    set -e
+                    echo "🔄 开始创建 Community 数据库..."
+                    
+                    echo "环境变量:"
+                    echo "PGHOST: \$PGHOST"
+                    echo "PGPORT: \$PGPORT"
+                    echo "PGUSER: \$PGUSER"
+                    echo "COMMUNITY_DB_NAME: \$COMMUNITY_DB_NAME"
+                    echo "COMMUNITY_DB_USERNAME: \$COMMUNITY_DB_USERNAME"
+                    
+                    # 等待 RDS 可用
+                    echo "⏳ 等待 RDS 可用..."
+                    for i in \$(seq 1 30); do
+                      if psql -d postgres -c "\q" 2>/dev/null; then
+                        echo "✅ RDS 连接成功"
+                        break
+                      else
+                        echo "⏳ 尝试 \$i: RDS 连接失败，等待 10 秒..."
+                        sleep 10
+                      fi
+                    done
+                    
+                    # 创建 community 数据库
+                    echo "创建数据库: \$COMMUNITY_DB_NAME"
+                    psql -d postgres -c "CREATE DATABASE IF NOT EXISTS \$COMMUNITY_DB_NAME;"
+                    
+                    # 创建用户并授予权限
+                    echo "创建用户: \$COMMUNITY_DB_USERNAME"
+                    psql -d postgres -c "CREATE USER \$COMMUNITY_DB_USERNAME WITH PASSWORD '\$COMMUNITY_DB_PASSWORD';" 2>/dev/null || echo "用户可能已存在，继续..."
+                    psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \$COMMUNITY_DB_NAME TO \$COMMUNITY_DB_USERNAME;"
+                    
+                    # 验证数据库创建
+                    echo "验证数据库创建..."
+                    psql -d postgres -c "\l" | grep "\$COMMUNITY_DB_NAME" && echo "✅ 数据库创建验证成功" || echo "⚠️ 数据库创建验证未找到记录"
+                    
+                    echo "✅ Community 数据库设置完成"
+                restartPolicy: Never
+            backoffLimit: 2
+          EOF
+          
+          echo "⏳ 等待 Community 数据库创建 Job 完成..."
+          if kubectl wait --for=condition=complete job/community-db-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
+            echo "✅ Community 数据库创建成功"
+            echo "=== Job 日志 ==="
+            kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }}
+            # 清理 Job
+            kubectl delete job community-db-setup -n ${{ env.NAMESPACE }}
+          else
+            echo "❌ Community 数据库创建失败"
+            echo "=== 检查 Job 状态 ==="
+            kubectl describe job community-db-setup -n ${{ env.NAMESPACE }}
+            echo "=== 检查 Pod 日志 ==="
+            kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }}
+            exit 1
+          fi
 
       - name: 🚀 Deploy or Replace Deployments
         run: |
-          echo "=== 调试: 部署或替换 Deployments ==="
           cd k8s
-          # 检查 Deployment 是否存在，如果存在则替换，否则创建
           if kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} &> /dev/null; then
-            echo "🔄 替换现有的 backend-deployment..."
             kubectl replace -f deployments/backend-deployment.yaml -n ${{ env.NAMESPACE }} --force
           else
-            echo "🚀 创建新的 backend-deployment..."
             kubectl apply -f deployments/backend-deployment.yaml -n ${{ env.NAMESPACE }}
           fi
           
           if kubectl get deployment frontend-deployment -n ${{ env.NAMESPACE }} &> /dev/null; then
-            echo "🔄 替换现有的 frontend-deployment..."
             kubectl replace -f deployments/frontend-deployment.yaml -n ${{ env.NAMESPACE }} --force
           else
-            echo "🚀 创建新的 frontend-deployment..."
             kubectl apply -f deployments/frontend-deployment.yaml -n ${{ env.NAMESPACE }}
           fi
-          echo "✅ Deployments 部署完成"
 
       - name: 🔍 Check if Migration is Needed
         id: check-migration
         run: |
-          echo "=== 调试: 检查是否需要迁移 ==="
-          # 检查当前运行的 backend 镜像
           CURRENT_BACKEND_IMAGE=$(kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           NEW_BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
           
-          echo "当前后端镜像: $CURRENT_BACKEND_IMAGE"
-          echo "新的后端镜像: $NEW_BACKEND_IMAGE"
-          
-          # 如果镜像发生变化或者这是首次部署，则执行迁移
           if [ "$CURRENT_BACKEND_IMAGE" != "$NEW_BACKEND_IMAGE" ] || [ -z "$CURRENT_BACKEND_IMAGE" ]; then
-            echo "🔄 后端镜像发生变化或首次部署，需要执行迁移"
             echo "migration_needed=true" >> $GITHUB_OUTPUT
           else
-            echo "✅ 后端镜像未变化，跳过迁移"
             echo "migration_needed=false" >> $GITHUB_OUTPUT
           fi
 
       - name: 🧹 Clean Up Existing Migration Job
         if: steps.check-migration.outputs.migration_needed == 'true'
         run: |
-          echo "=== 调试: 清理现有迁移 Job ==="
           kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
-          echo "✅ 迁移 Job 清理完成"
 
       - name: 🗃 Run Database Migrations (if needed)
         if: steps.check-migration.outputs.migration_needed == 'true'
         run: |
-          echo "=== 调试: 运行数据库迁移 ==="
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
-          
-          echo "使用的后端镜像: $BACKEND_IMAGE"
-          
-          # 直接使用 sed 替换 PLACEHOLDER_BACKEND_IMAGE（匹配迁移文件中的占位符）
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
-          
-          # 验证替换是否成功
-          echo "=== 验证镜像替换 ==="
-          grep "image:" /tmp/db-migration-job.yaml
-          
-          # 检查是否还有占位符
-          if grep -q "PLACEHOLDER_BACKEND_IMAGE" /tmp/db-migration-job.yaml; then
-            echo "❌ 错误: 镜像占位符没有被替换"
-            exit 1
-          fi
-          
-          # 应用 migration job
           kubectl apply -f /tmp/db-migration-job.yaml
 
-          # 等待迁移完成
-          echo "⏳ 等待数据库迁移完成..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
-            echo "✅ 迁移成功完成"
-            echo "=== 迁移日志 ==="
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            
-            # 清理 migration job
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
-            echo "❌ 迁移失败或超时"
-            echo "=== 检查迁移 Pod 状态 ==="
-            kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
-            echo "=== 检查 Job 状态 ==="
-            kubectl describe job db-migration -n ${{ env.NAMESPACE }}
-            
-            # 尝试获取 Pod 日志
-            MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-            if [ -n "$MIGRATION_POD" ]; then
-              echo "=== 迁移 Pod 日志 ==="
-              kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
-            else
-              echo "没有找到迁移 Pod，可能是镜像拉取失败"
-              echo "=== 检查 Events ==="
-              kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -10
-            fi
+            echo "迁移失败"
             exit 1
           fi
 
       - name: 🔄 Update Deployment Images
         run: |
-          echo "=== 调试: 更新 Deployment 镜像 ==="
-          # 使用 patch 更新镜像（不会触发 selector 不可变错误）
           BACKEND_IMAGE="${{ needs.build-and-push-images.outputs.backend_image }}"
           FRONTEND_IMAGE="${{ needs.build-and-push-images.outputs.frontend_image }}"
           
-          echo "更新后端 Deployment 镜像为: $BACKEND_IMAGE"
           kubectl patch deployment backend-deployment -n ${{ env.NAMESPACE }} \
             -p='{"spec":{"template":{"spec":{"containers":[{"name":"backend","image":"'"$BACKEND_IMAGE"'"}]}}}}'
           
-          echo "更新前端 Deployment 镜像为: $FRONTEND_IMAGE"
           kubectl patch deployment frontend-deployment -n ${{ env.NAMESPACE }} \
             -p='{"spec":{"template":{"spec":{"containers":[{"name":"frontend","image":"'"$FRONTEND_IMAGE"'"}]}}}}'
-          echo "✅ Deployment 镜像更新完成"
 
       - name: ⏳ Wait for Deployments
         run: |
-          echo "=== 调试: 等待 Deployments 就绪 ==="
           kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
           kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=180s
-          echo "✅ 所有 Deployments 已就绪"
 
       - name: 🌐 Get ALB URL
         id: get-alb-url
         run: |
-          echo "=== 调试: 获取 ALB URL ==="
-          echo "等待 ALB 就绪..."
           for i in {1..15}; do
             ALB_HOSTNAME=$(kubectl get ingress comic-website-ingress -n ${{ env.NAMESPACE }} -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$ALB_HOSTNAME" ]; then
-              echo "✅ ALB 已就绪!"
-              echo "ALB Hostname: $ALB_HOSTNAME"
-              echo "Application URL: http://$ALB_HOSTNAME"
               echo "alb_url=http://$ALB_HOSTNAME" >> $GITHUB_OUTPUT
               break
             else
-              echo "⏳ 尝试 $i: ALB 尚未就绪，等待 20 秒..."
               sleep 20
             fi
           done
-          
-          if [ -z "$ALB_HOSTNAME" ]; then
-            echo "❌ ALB 在超时时间内未能就绪"
-            exit 1
-          fi
 
       - name: 📢 Display Application URL
         run: |
