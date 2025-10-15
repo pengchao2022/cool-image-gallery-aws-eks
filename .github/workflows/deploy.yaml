@@ -337,15 +337,15 @@ jobs:
       - name: 🗃 Run Main Database Migrations
         run: |
           echo "🚀 Running main database migration..."
-          kubectl apply -f k8s/migrations/database-migration.yaml
+          kubectl apply -f k8s/migrations/db-migration-job.yaml
           
           echo "Waiting for database migration to complete..."
-          if kubectl wait --for=condition=complete job/database-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
+          if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             echo "✅ Database migration successful"
-            kubectl delete job database-migration -n ${{ env.NAMESPACE }}
+            kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
             echo "❌ Database migration failed"
-            kubectl logs job/database-migration -n ${{ env.NAMESPACE }} --tail=50
+            kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=50
             exit 1
           fi
 
