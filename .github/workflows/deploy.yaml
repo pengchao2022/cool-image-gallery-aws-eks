@@ -301,6 +301,7 @@ jobs:
         run: |
           echo "=== 清理已存在的 Community 数据库 Job ==="
           kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
           echo "✅ 清理完成"
 
@@ -408,6 +409,190 @@ jobs:
             kubectl describe job community-db-setup -n ${{ env.NAMESPACE }}
             echo "=== 检查 Pod 日志 ==="
             kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }}
+            exit 1
+          fi
+
+      - name: 🗃 Create Community Database Tables via Kubernetes Job
+        run: |
+          echo "=== 使用 Kubernetes Job 创建 Community 数据库表结构 ==="
+          
+          # 创建 Kubernetes Job 来执行表结构创建
+          cat <<EOF | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: community-schema-setup
+            namespace: ${{ env.NAMESPACE }}
+          spec:
+            template:
+              spec:
+                containers:
+                - name: postgres-migration
+                  image: postgres:15-alpine
+                  env:
+                  - name: PGHOST
+                    value: "$(echo "${{ needs.terraform-infrastructure.outputs.rds_endpoint }}" | cut -d':' -f1)"
+                  - name: PGPORT
+                    value: "${{ needs.terraform-infrastructure.outputs.rds_port }}"
+                  - name: PGUSER
+                    value: "community_user"
+                  - name: PGPASSWORD
+                    value: "${{ secrets.COMMUNITY_DB_PASSWORD }}"
+                  - name: PGDATABASE
+                    value: "communitydb"
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    set -e
+                    echo "🔄 开始创建 Community 数据库表结构..."
+                    
+                    # 等待数据库可用
+                    echo "⏳ 等待数据库可用..."
+                    for i in \$(seq 1 30); do
+                      if psql -c "\q" 2>/dev/null; then
+                        echo "✅ 数据库连接成功"
+                        break
+                      else
+                        echo "⏳ 尝试 \$i: 数据库连接失败，等待 10 秒..."
+                        sleep 10
+                      fi
+                    done
+                    
+                    # 执行 SQL 语句创建表结构
+                    echo "创建表结构..."
+                    psql -c "
+                    -- Enable extensions
+                    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+                    -- 创建用户表
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        username VARCHAR(50) UNIQUE NOT NULL,
+                        email VARCHAR(255) UNIQUE NOT NULL,
+                        password_hash VARCHAR(255) NOT NULL,
+                        role VARCHAR(20) DEFAULT 'user',
+                        avatar TEXT,
+                        reputation INTEGER DEFAULT 0,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    -- 创建帖子表
+                    CREATE TABLE IF NOT EXISTS posts (
+                        id SERIAL PRIMARY KEY,
+                        title VARCHAR(255) NOT NULL,
+                        content TEXT NOT NULL,
+                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        post_type VARCHAR(50) DEFAULT 'discussion',
+                        category VARCHAR(100) DEFAULT 'general',
+                        status VARCHAR(20) DEFAULT 'published',
+                        view_count INTEGER DEFAULT 0,
+                        like_count INTEGER DEFAULT 0,
+                        comment_count INTEGER DEFAULT 0,
+                        tags VARCHAR(500),
+                        is_pinned BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    -- 创建评论表
+                    CREATE TABLE IF NOT EXISTS comments (
+                        id SERIAL PRIMARY KEY,
+                        post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        parent_id INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+                        content TEXT NOT NULL,
+                        like_count INTEGER DEFAULT 0,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    -- 创建点赞表
+                    CREATE TABLE IF NOT EXISTS likes (
+                        id SERIAL PRIMARY KEY,
+                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+                        comment_id INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT unique_user_post_like UNIQUE (user_id, post_id),
+                        CONSTRAINT unique_user_comment_like UNIQUE (user_id, comment_id),
+                        CONSTRAINT check_like_target CHECK (
+                            (post_id IS NOT NULL AND comment_id IS NULL) OR 
+                            (post_id IS NULL AND comment_id IS NOT NULL)
+                        )
+                    );
+
+                    -- 创建索引
+                    CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
+                    CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_posts_type_status ON posts(post_type, status);
+                    CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category);
+                    CREATE INDEX IF NOT EXISTS idx_posts_like_count ON posts(like_count DESC);
+                    CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned, created_at DESC);
+
+                    CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+                    CREATE INDEX IF NOT EXISTS idx_comments_user_id ON comments(user_id);
+                    CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id);
+                    CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at DESC);
+
+                    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+                    CREATE INDEX IF NOT EXISTS idx_users_reputation ON users(reputation DESC);
+
+                    -- 创建触发器函数
+                    CREATE OR REPLACE FUNCTION update_updated_at_column()
+                    RETURNS TRIGGER AS \\$\\$
+                    BEGIN
+                        NEW.updated_at = CURRENT_TIMESTAMP;
+                        RETURN NEW;
+                    END;
+                    \\$\\$ language 'plpgsql';
+
+                    -- 创建触发器
+                    DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+                    CREATE TRIGGER update_users_updated_at
+                        BEFORE UPDATE ON users
+                        FOR EACH ROW
+                        EXECUTE FUNCTION update_updated_at_column();
+
+                    DROP TRIGGER IF EXISTS update_posts_updated_at ON posts;
+                    CREATE TRIGGER update_posts_updated_at
+                        BEFORE UPDATE ON posts
+                        FOR EACH ROW
+                        EXECUTE FUNCTION update_updated_at_column();
+
+                    DROP TRIGGER IF EXISTS update_comments_updated_at ON comments;
+                    CREATE TRIGGER update_comments_updated_at
+                        BEFORE UPDATE ON comments
+                        FOR EACH ROW
+                        EXECUTE FUNCTION update_updated_at_column();
+
+                    -- 验证表创建
+                    SELECT '✅ 表结构创建完成' as status;
+                    "
+
+                    # 验证表创建
+                    echo "验证表创建..."
+                    psql -c "\dt" && echo "✅ 表结构创建验证成功"
+
+                    echo "✅ Community 数据库表结构创建完成"
+                restartPolicy: Never
+            backoffLimit: 2
+          EOF
+          
+          echo "⏳ 等待 Community 数据库表结构创建 Job 完成..."
+          if kubectl wait --for=condition=complete job/community-schema-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
+            echo "✅ Community 数据库表结构创建成功"
+            echo "=== Job 日志 ==="
+            kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }}
+            # 清理 Job
+            kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }}
+          else
+            echo "❌ Community 数据库表结构创建失败"
+            echo "=== 检查 Job 状态 ==="
+            kubectl describe job community-schema-setup -n ${{ env.NAMESPACE }}
+            echo "=== 检查 Pod 日志 ==="
+            kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }}
             exit 1
           fi
 

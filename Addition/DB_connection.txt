@@ -1,0 +1,49 @@
+PGHOST: comic-website-prod-db.c8hmw642ur0e.us-east-1.rds.amazonaws.com
+PGPORT: 5432
+PGUSER: comicadmin
+COMMUNITY_DB_NAME: communitydb
+COMMUNITY_DB_USERNAME: community_user
+
+password: Hello_2025
+
+
+# 连接你的 RDS 数据库
+psql -h comic-website-prod-db.c8hmw642ur0e.us-east-1.rds.amazonaws.com -p 5432 -U comicadmin -d comicdb
+
+# 连接 community 数据库
+psql -h comic-website-prod-db.c8hmw642ur0e.us-east-1.rds.amazonaws.com -p 5432 -U community_user -d communitydb
+
+
+
+#常用的执行命令：
+
+-- 列出所有数据库
+\l
+
+-- 切换到另一个数据库
+\c 数据库名
+
+-- 列出当前数据库的所有表
+\dt
+
+-- 列出所有表（包括系统表）
+\dt+
+
+-- 查看表结构
+\d 表名
+
+-- 查看所有用户/角色
+\du
+
+-- 执行 SQL 文件
+\i /path/to/file.sql
+
+-- 显示查询执行时间
+\timing
+
+-- 退出 psql
+\q
+
+
+
+
