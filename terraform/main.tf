@@ -35,7 +35,7 @@ module "rds" {
   project_name       = var.project_name
   environment        = var.environment
   common_tags        = local.common_tags
-  
+
   # 新增 Community 数据库变量
   community_db_name     = var.community_db_name
   community_db_username = var.community_db_username
@@ -93,13 +93,13 @@ module "eks" {
 module "redis" {
   source = "./redis"
 
-  project_name        = var.project_name
-  environment         = var.environment
-  vpc_id              = module.vpc.vpc_id
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  eks_cluster_sg_id   = module.eks.cluster_security_group_id
-  redis_node_type     = var.redis_node_type
-  common_tags         = local.common_tags
+  project_name       = var.project_name
+  environment        = var.environment
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+  eks_cluster_sg_id  = module.eks.cluster_security_group_id
+  redis_node_type    = var.redis_node_type
+  common_tags        = local.common_tags
 }
 
 # 数据源

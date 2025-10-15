@@ -134,25 +134,3 @@ output "redis_port" {
   value       = module.redis.redis_port
 }
 
-output "community_database_name" {
-  description = "Name of the community database"
-  value       = module.rds.community_database_name
-}
-
-output "community_database_username" {
-  description = "Username for community database"
-  value       = module.rds.community_database_username
-}
-
-output "community_database_url" {
-  description = "Connection URL for community database (sensitive)"
-  value       = module.rds.community_database_url
-  sensitive   = true
-}
-
-output "all_databases" {
-  description = "List of all databases in RDS instance"
-  value       = module.rds.all_databases
-}
-
-
