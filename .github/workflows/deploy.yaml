@@ -85,10 +85,6 @@ jobs:
           cd terraform
           terraform output -json > outputs.json
           
-          echo "=== 调试: 原始 outputs.json 内容 ==="
-          cat outputs.json
-          echo "=== 调试结束 ==="
-          
           BACKEND_ECR_URL=$(jq -r '.backend_repository_url.value // empty' outputs.json)
           FRONTEND_ECR_URL=$(jq -r '.frontend_repository_url.value // empty' outputs.json)
           RDS_ENDPOINT=$(jq -r '.rds_endpoint.value // empty' outputs.json)
@@ -122,20 +118,6 @@ jobs:
           # 使用硬编码值
           echo "community_database_name=$COMMUNITY_DB_NAME" >> $GITHUB_OUTPUT
           echo "community_database_username=$COMMUNITY_DB_USERNAME" >> $GITHUB_OUTPUT
-
-          # 显示 Terraform 输出的重要信息
-          echo "=== Terraform Outputs ==="
-          echo "Backend ECR URL: $BACKEND_ECR_URL"
-          echo "Frontend ECR URL: $FRONTEND_ECR_URL"
-          echo "RDS Endpoint: $RDS_ENDPOINT"
-          echo "RDS Port: $RDS_PORT"
-          echo "RDS Username: $RDS_USERNAME"
-          echo "RDS Database: $RDS_DATABASE"
-          echo "S3 Bucket: $S3_BUCKET_NAME"
-          echo "S3 Bucket Region: $S3_BUCKET_REGION"
-          echo "ALB URL: $ALB_URL"
-          echo "Community Database: $COMMUNITY_DB_NAME"
-          echo "Community Database Username: $COMMUNITY_DB_USERNAME"
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -315,6 +297,13 @@ jobs:
           kubectl apply -f networking/alb-ingress-class.yaml
           kubectl apply -f networking/alb-ingress.yaml
 
+      - name: 🧹 Clean Up Existing Community DB Job
+        run: |
+          echo "=== 清理已存在的 Community 数据库 Job ==="
+          kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          sleep 5
+          echo "✅ 清理完成"
+
       - name: 🗃 Create Community Database via Kubernetes Job
         run: |
           echo "=== 使用 Kubernetes Job 创建 Community 数据库 ==="
@@ -356,7 +345,7 @@ jobs:
                     
                     echo "环境变量:"
                     echo "PGHOST: \$PGHOST"
-                    echo "PGPORT: \$PGPORT"
+                    echo "PGPORT: \$PGPORT" 
                     echo "PGUSER: \$PGUSER"
                     echo "COMMUNITY_DB_NAME: \$COMMUNITY_DB_NAME"
                     echo "COMMUNITY_DB_USERNAME: \$COMMUNITY_DB_USERNAME"
