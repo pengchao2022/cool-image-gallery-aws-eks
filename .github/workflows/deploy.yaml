@@ -147,6 +147,9 @@ jobs:
       backend_image: ${{ steps.build-backend.outputs.image_tag }}
       frontend_image: ${{ steps.build-frontend.outputs.image_tag }}
       community_image: ${{ steps.build-community.outputs.image_tag }}
+      backend_image_tag: ${{ steps.build-backend.outputs.image_tag_only }}
+      frontend_image_tag: ${{ steps.build-frontend.outputs.image_tag_only }}
+      community_image_tag: ${{ steps.build-community.outputs.image_tag_only }}
 
     steps:
       - name: 🧩 Checkout code
@@ -201,9 +204,11 @@ jobs:
           if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
             echo "image_exists=true" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+            echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
           else
             echo "image_exists=false" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+            echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
           fi
 
       - name: 🧱 Build Backend Image (if needed)
@@ -249,6 +254,7 @@ jobs:
           
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+          echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: 🎨 Build Frontend Image
         id: build-frontend
@@ -260,6 +266,7 @@ jobs:
           docker build -t $FRONTEND_IMAGE .
           docker push $FRONTEND_IMAGE
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+          echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: 💬 Build Community Service Image
         id: build-community
@@ -271,6 +278,7 @@ jobs:
           docker build -t $COMMUNITY_IMAGE .
           docker push $COMMUNITY_IMAGE
           echo "image_tag=$COMMUNITY_IMAGE" >> $GITHUB_OUTPUT
+          echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
   configure-rds-database:
     name: "Configure RDS Database"
@@ -355,7 +363,18 @@ jobs:
       - name: 🗃 Run Main Database Migrations
         run: |
           echo "🚀 Running main database migration..."
-          kubectl apply -f k8s/migrations/db-migration-job.yaml
+          
+          # 动态更新 migration job 的镜像标签
+          BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
+          BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
+          BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
+          
+          echo "Using backend image for migration: $BACKEND_IMAGE"
+          
+          # 使用 envsubst 动态替换镜像标签
+          export BACKEND_IMAGE="$BACKEND_IMAGE"
+          envsubst < k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
+          kubectl apply -f k8s/migrations/db-migration-job-temp.yaml
           
           echo "获取迁移 Pod 信息..."
           kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
@@ -381,6 +400,7 @@ jobs:
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             echo "✅ Database migration successful"
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
+            rm -f k8s/migrations/db-migration-job-temp.yaml
           else
             echo "❌ Database migration failed"
             # 再次获取日志
@@ -389,6 +409,7 @@ jobs:
               echo "=== 最终 Pod 日志 ==="
               kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --tail=100
             fi
+            rm -f k8s/migrations/db-migration-job-temp.yaml
             exit 1
           fi
 
@@ -479,19 +500,46 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-      - name: 🚀 Deploy Backend
+      
+      - name: 🔄 Update Backend Deployment with Latest Image
+        run: |
+          BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
+          echo "Updating backend deployment with image: $BACKEND_IMAGE"
+          
+          # 方法1: 使用 kubectl set image (推荐)
+          kubectl set image deployment/backend-deployment -n ${{ env.NAMESPACE }} backend=$BACKEND_IMAGE
+          
+          # 方法2: 备选方案 - 使用 kubectl patch
+          # kubectl patch deployment backend-deployment -n ${{ env.NAMESPACE }} -p='{"spec":{"template":{"spec":{"containers":[{"name":"backend","image":"'"$BACKEND_IMAGE"'"}]}}}}'
+          
+          echo "✅ Backend image updated successfully"
+      
+      - name: 🚀 Deploy Backend Resources
         run: |
           cd k8s
           kubectl apply -f service-accounts/backend-service-account.yaml
           kubectl apply -f configs/backend-config.yaml
           kubectl apply -f service/backend-service.yaml
-          kubectl apply -f deployments/backend-deployment.yaml
-      - name: 🔄 Update Backend Image
-        run: |
-          BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
-          kubectl patch deployment backend-deployment -n ${{ env.NAMESPACE }} -p='{"spec":{"template":{"spec":{"containers":[{"name":"backend","image":"'"$BACKEND_IMAGE"'"}]}}}}'
+          # 注意: 这里不直接应用 deployment，因为我们已经用最新镜像更新了它
+      
       - name: ⏳ Wait for Backend Deployment
         run: kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
+      
+      - name: 🔍 Verify Backend Deployment
+        run: |
+          echo "=== 检查 Backend Pod 状态 ==="
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend
+          
+          echo "=== 检查当前使用的镜像 ==="
+          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}'
+          echo ""
+          
+          echo "=== 检查 Pod 日志 ==="
+          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
+          if [ "$BACKEND_POD" != "not-found" ]; then
+            echo "Backend Pod logs:"
+            kubectl logs $BACKEND_POD -n ${{ env.NAMESPACE }} --tail=20
+          fi
 
   deploy-community:
     name: "Deploy Community Service to EKS"
@@ -511,20 +559,29 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-      - name: 🚀 Deploy Community
+      
+      - name: 🔄 Update Community Deployment with Latest Image
+        run: |
+          COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
+          echo "Updating community deployment with image: $COMMUNITY_IMAGE"
+          
+          # 使用 kubectl set image 更新社区服务镜像
+          kubectl set image deployment/community-deployment -n ${{ env.NAMESPACE }} community-service=$COMMUNITY_IMAGE
+          
+          echo "✅ Community image updated successfully"
+      
+      - name: 🚀 Deploy Community Resources
         run: |
           cd k8s
           kubectl apply -f service-accounts/community-service-account.yaml
           kubectl apply -f configs/community-configmap.yaml
           kubectl apply -f configs/community-secret.yaml
           kubectl apply -f service/community-service.yaml
-          kubectl apply -f deployments/community-deployment.yaml
-      - name: 🔄 Update Community Image
-        run: |
-          COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
-          kubectl patch deployment community-deployment -n ${{ env.NAMESPACE }} -p='{"spec":{"template":{"spec":{"containers":[{"name":"community-service","image":"'"$COMMUNITY_IMAGE"'"}]}}}}'
+          # 注意: 这里不直接应用 deployment，因为我们已经用最新镜像更新了它
+      
       - name: ⏳ Wait for Community Deployment
         run: kubectl rollout status deployment/community-deployment -n ${{ env.NAMESPACE }} --timeout=180s
+      
       - name: 🌐 Get ALB URL
         id: get-alb-url
         run: |
@@ -537,6 +594,7 @@ jobs:
               sleep 20
             fi
           done
+      
       - name: 📢 Display Application URL
         run: |
           echo "================================================"
@@ -551,3 +609,33 @@ jobs:
           echo "   ✅ Database Migrations: Complete"
           echo "🎉 Application is fully operational!"
           echo "================================================"
+
+  # 新增: 自动回滚检查 Job
+  rollback-check:
+    name: "Rollback Check"
+    runs-on: ubuntu-latest
+    needs: [deploy-frontend, deploy-backend, deploy-community]
+    environment: production
+    if: always()
+
+    steps:
+      - name: 🔑 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: ☸️ Update kubeconfig
+        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
+      
+      - name: 🔍 Check Deployment Status
+        run: |
+          echo "=== 最终部署状态检查 ==="
+          kubectl get deployments -n ${{ env.NAMESPACE }}
+          echo ""
+          echo "=== Pod 状态 ==="
+          kubectl get pods -n ${{ env.NAMESPACE }}
+          echo ""
+          echo "=== 服务状态 ==="
+          kubectl get services -n ${{ env.NAMESPACE }}
