@@ -1,0 +1,139 @@
+# k8s/migrations/community-schema-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: community-db-setup
+  namespace: comic-website
+spec:
+  template:
+    spec:
+      serviceAccountName: comic-backend-sa
+      containers:
+      - name: community-db-setup
+        image: 319998871902.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend:latest
+        command: ["/bin/sh"]
+        args:
+          - "-c"
+          - |
+            set -e
+            echo "🚀 Starting Community database setup..."
+            
+            # 从环境变量获取数据库连接信息
+            DB_HOST="$RDS_HOST"
+            DB_PORT="$RDS_PORT"
+            DB_USER="$RDS_USERNAME"
+            DB_PASSWORD="$RDS_PASSWORD"
+            MAIN_DB="$RDS_DATABASE"
+            COMMUNITY_DB="communitydb"
+            COMMUNITY_USER="community_user"
+            COMMUNITY_PASSWORD="$COMMUNITY_DB_PASSWORD"
+            
+            echo "📊 Database configuration:"
+            echo "   Host: $DB_HOST"
+            echo "   Port: $DB_PORT"
+            echo "   Main Database: $MAIN_DB"
+            echo "   Community Database: $COMMUNITY_DB"
+            echo "   Community User: $COMMUNITY_USER"
+            
+            # 安装 PostgreSQL 客户端
+            echo "📦 Installing PostgreSQL client..."
+            apk add --no-cache postgresql-client
+            
+            # 等待数据库可用
+            echo "⏳ Waiting for database to be available..."
+            until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER -d $MAIN_DB; do
+              echo "Waiting for database connection..."
+              sleep 2
+            done
+            
+            # 创建 Community 数据库
+            echo "🗃 Creating Community database..."
+            PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $MAIN_DB << EOF
+            CREATE DATABASE $COMMUNITY_DB;
+            EOF
+            
+            # 创建 Community 数据库用户
+            echo "👤 Creating Community database user..."
+            PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $MAIN_DB << EOF
+            CREATE USER $COMMUNITY_USER WITH PASSWORD '$COMMUNITY_PASSWORD';
+            GRANT ALL PRIVILEGES ON DATABASE $COMMUNITY_DB TO $COMMUNITY_USER;
+            EOF
+            
+            echo "✅ Community database setup completed successfully!"
+        env:
+        - name: RDS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: host
+        - name: RDS_PORT
+          value: "5432"
+        - name: RDS_USERNAME
+          value: "comicadmin"
+        - name: RDS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: password
+        - name: RDS_DATABASE
+          value: "comicdb"
+        - name: COMMUNITY_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: backend-secret
+              key: community-db-password
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+      restartPolicy: OnFailure
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: community-schema-setup
+  namespace: comic-website
+spec:
+  template:
+    spec:
+      serviceAccountName: comic-backend-sa
+      containers:
+      - name: community-schema-setup
+        image: 319998871902.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend:latest
+        command: ["node"]
+        args: ["scripts/migration.sql"]
+        env:
+        - name: RDS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: host
+        - name: RDS_PORT
+          value: "5432"
+        - name: RDS_DATABASE
+          value: "communitydb"
+        - name: RDS_USERNAME
+          value: "community_user"
+        - name: RDS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: backend-secret
+              key: community-db-password
+        - name: NODE_ENV
+          value: "production"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+      restartPolicy: OnFailure
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
