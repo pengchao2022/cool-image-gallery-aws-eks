@@ -214,11 +214,45 @@ jobs:
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing backend image: $BACKEND_IMAGE"
+          echo "🏗 Building and pushing backend image: $BACKEND_IMAGE"
           
-          # 使用 --no-cache 确保重新构建包含 scripts 目录
-          docker build --no-cache -t $BACKEND_IMAGE .
+          # 详细的构建前检查
+          echo "=== 🔍 PRE-BUILD DEBUG ==="
+          echo "Current directory: $(pwd)"
+          echo "Files in backend directory:"
+          ls -la
+          echo "Scripts directory contents:"
+          ls -la scripts/ || echo "❌ scripts directory not found"
+          echo "Checking .dockerignore:"
+          cat .dockerignore 2>/dev/null || echo "No .dockerignore file"
+          echo "=== END PRE-BUILD DEBUG ==="
+          
+          # 使用详细的构建输出
+          echo "🔧 Building Docker image with detailed output..."
+          docker build --no-cache --progress=plain -t $BACKEND_IMAGE .
+          
+          # 验证镜像内容
+          echo "🔍 Verifying image contents..."
+          docker run --rm $BACKEND_IMAGE sh -c "
+            echo '=== Image Contents Debug ===';
+            echo 'Current directory:';
+            pwd;
+            echo 'Root directory contents:';
+            ls -la /;
+            echo 'App directory contents:';
+            ls -la /app/;
+            echo '=== Checking scripts directory ===';
+            ls -la /app/scripts/ 2>/dev/null || echo '❌ SCRIPTS DIRECTORY NOT FOUND';
+            echo '=== Searching for migrate.js ===';
+            find /app -name 'migrate.js' -type f 2>/dev/null || echo '❌ migrate.js NOT FOUND';
+            echo '=== Checking file permissions ===';
+            ls -la /app/scripts/migrate.js 2>/dev/null || echo '❌ Cannot check migrate.js permissions';
+            echo '=== End Image Debug ==='
+          "
+          
+          echo "📤 Pushing backend image to ECR..."
           docker push $BACKEND_IMAGE
+          echo "✅ Backend image pushed successfully"
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
 
       - name: 🎨 Build Frontend Image
@@ -227,7 +261,7 @@ jobs:
           cd frontend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing frontend image: $FRONTEND_IMAGE"
+          echo "🎨 Building and pushing frontend image: $FRONTEND_IMAGE"
           docker build -t $FRONTEND_IMAGE .
           docker push $FRONTEND_IMAGE
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
@@ -238,7 +272,7 @@ jobs:
           cd community-service
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           COMMUNITY_IMAGE="$COMMUNITY_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing community service image: $COMMUNITY_IMAGE"
+          echo "💬 Building and pushing community service image: $COMMUNITY_IMAGE"
           docker build -t $COMMUNITY_IMAGE .
           docker push $COMMUNITY_IMAGE
           echo "image_tag=$COMMUNITY_IMAGE" >> $GITHUB_OUTPUT
@@ -313,20 +347,20 @@ jobs:
       - name: 🗃 Run Main Database Migrations
         run: |
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
-          echo "Running main database migrations with image: $BACKEND_IMAGE"
+          echo "🔄 Running main database migrations with image: $BACKEND_IMAGE"
           
           # 使用现有的 db-migration-job.yaml 文件，只替换镜像
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > /tmp/db-migration-job.yaml
           kubectl apply -f /tmp/db-migration-job.yaml
 
-          echo "Waiting for main database migration to complete..."
+          echo "⏳ Waiting for main database migration to complete..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
             MIGRATION_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}')
-            echo "Main database migration successful"
+            echo "✅ Main database migration successful"
             kubectl logs $MIGRATION_POD -n ${{ env.NAMESPACE }}
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
           else
-            echo "Main database migration failed"
+            echo "❌ Main database migration failed"
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
             LATEST_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
             kubectl logs $LATEST_POD -n ${{ env.NAMESPACE }}
@@ -338,12 +372,12 @@ jobs:
           # 使用现有的 community-schema-job.yaml 文件
           kubectl apply -f k8s/migrations/community-schema-job.yaml
 
-          echo "Waiting for Community database creation to complete..."
+          echo "⏳ Waiting for Community database creation to complete..."
           if kubectl wait --for=condition=complete job/community-db-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "Community database creation successful"
+            echo "✅ Community database creation successful"
             kubectl delete job community-db-setup -n ${{ env.NAMESPACE }}
           else
-            echo "Community database creation failed"
+            echo "❌ Community database creation failed"
             kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }}
             exit 1
           fi
@@ -352,19 +386,19 @@ jobs:
         run: |
           kubectl apply -f k8s/migrations/community-schema-job.yaml
 
-          echo "Waiting for Community database table structure creation to complete..."
+          echo "⏳ Waiting for Community database table structure creation to complete..."
           if kubectl wait --for=condition=complete job/community-schema-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "Community database table structure creation successful"
+            echo "✅ Community database table structure creation successful"
             kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }}
           else
-            echo "Community database table structure creation failed"
+            echo "❌ Community database table structure creation failed"
             kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }}
             exit 1
           fi
 
       - name: ✅ Verify Database Configuration
         run: |
-          echo "Database configuration completed"
+          echo "✅ Database configuration completed"
 
   deploy-frontend:
     name: "Deploy Frontend Service to EKS"
@@ -460,7 +494,7 @@ jobs:
 
       - name: ✅ Verify Frontend Service
         run: |
-          echo "Frontend service deployed successfully"
+          echo "✅ Frontend service deployed successfully"
 
   deploy-backend:
     name: "Deploy Backend Service to EKS"
@@ -526,7 +560,7 @@ jobs:
 
       - name: ✅ Verify Backend Service
         run: |
-          echo "Backend service deployed successfully"
+          echo "✅ Backend service deployed successfully"
 
   deploy-community:
     name: "Deploy Community Service to EKS"
@@ -621,7 +655,7 @@ jobs:
 
       - name: ✅ Verify Community Service
         run: |
-          echo "Community service deployed successfully"
+          echo "✅ Community service deployed successfully"
 
       - name: 🌐 Get ALB URL
         id: get-alb-url
@@ -639,15 +673,15 @@ jobs:
       - name: 📢 Display Application URL
         run: |
           echo "================================================"
-          echo "All Services Deployed Successfully!"
+          echo "🚀 All Services Deployed Successfully!"
           echo "================================================"
           echo ""
-          echo "Access URL:"
+          echo "🌐 Access URL:"
           echo "   ${{ steps.get-alb-url.outputs.alb_url }}"
           echo ""
-          echo "Services Status:"
-          echo "   Frontend Service: Ready"
-          echo "   Backend API Service: Ready" 
-          echo "   Community Service: Ready"
-          echo "   Database Configuration: Complete"
+          echo "📊 Services Status:"
+          echo "   ✅ Frontend Service: Ready"
+          echo "   ✅ Backend API Service: Ready" 
+          echo "   ✅ Community Service: Ready"
+          echo "   ✅ Database Configuration: Complete"
           echo "================================================"
