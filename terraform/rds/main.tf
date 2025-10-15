@@ -167,19 +167,6 @@ resource "postgresql_database" "communitydb" {
   lc_ctype          = "en_US.UTF-8"
   allow_connections = true
 
-  # 使用 connection 块来配置连接
-  connection {
-    type     = "postgresql"
-    host     = aws_db_instance.main.address
-    port     = aws_db_instance.main.port
-    database = "postgres"
-    username = aws_db_instance.main.username
-    password = var.password
-    sslmode  = "require"
-    timeout  = 15
-  }
-
-  # 显式依赖 RDS 实例
   depends_on = [aws_db_instance.main]
 }
 
@@ -189,17 +176,7 @@ resource "postgresql_role" "community_user" {
   login    = true
   password = var.community_db_password
   inherit  = true
-
-  connection {
-    type     = "postgresql"
-    host     = aws_db_instance.main.address
-    port     = aws_db_instance.main.port
-    database = "postgres"
-    username = aws_db_instance.main.username
-    password = var.password
-    sslmode  = "require"
-    timeout  = 15
-  }
+  roles    = [aws_db_instance.main.username]
 
   depends_on = [aws_db_instance.main]
 }
@@ -210,17 +187,6 @@ resource "postgresql_grant" "communitydb_privileges" {
   role        = postgresql_role.community_user.name
   object_type = "database"
   privileges  = ["CREATE", "CONNECT", "TEMPORARY"]
-
-  connection {
-    type     = "postgresql"
-    host     = aws_db_instance.main.address
-    port     = aws_db_instance.main.port
-    database = "postgres"
-    username = aws_db_instance.main.username
-    password = var.password
-    sslmode  = "require"
-    timeout  = 15
-  }
 
   depends_on = [postgresql_database.communitydb, postgresql_role.community_user]
 }

@@ -35,6 +35,11 @@ module "rds" {
   project_name       = var.project_name
   environment        = var.environment
   common_tags        = local.common_tags
+  
+  # 新增 Community 数据库变量
+  community_db_name     = var.community_db_name
+  community_db_username = var.community_db_username
+  community_db_password = var.community_db_password
 }
 
 # ECR 模块
