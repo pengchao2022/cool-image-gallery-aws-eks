@@ -34,3 +34,10 @@ variable "common_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "redis_password" {
+  description = "The password for the Redis cluster"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

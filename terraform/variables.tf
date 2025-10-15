@@ -130,6 +130,13 @@ variable "redis_node_type" {
   default     = "cache.t3.small"
 }
 
+variable "redis_password" {
+  description = "The password for the Redis cluster"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Community Database Variables for RDS Module
 variable "community_db_name" {
   description = "Name for the community database"
