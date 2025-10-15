@@ -37,6 +37,16 @@ output "vpc_id" {
   value       = module.vpc.vpc_id
 }
 
+output "public_subnet_ids" {
+  description = "List of public subnet IDs"
+  value       = module.vpc.public_subnet_ids
+}
+
+output "private_subnet_ids" {
+  description = "List of private subnet IDs"
+  value       = module.vpc.private_subnet_ids
+}
+
 # RDS 相关输出
 output "rds_endpoint" {
   description = "RDS instance endpoint"
@@ -134,3 +144,18 @@ output "redis_port" {
   value       = module.redis.redis_port
 }
 
+# EC2 Outputs
+output "ec2_public_ip" {
+  description = "EC2 instance public IP address"
+  value       = module.ec2.ec2_public_ip
+}
+
+output "ec2_public_dns" {
+  description = "EC2 instance public DNS name"
+  value       = module.ec2.ec2_public_dns
+}
+
+output "ssh_connection_command" {
+  description = "SSH connection command"
+  value       = "ssh -i ~/.ssh/id_rsa ubuntu@${module.ec2.ec2_public_ip}"
+}

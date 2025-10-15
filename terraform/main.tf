@@ -114,3 +114,19 @@ locals {
     CreatedAt   = timestamp()
   }
 }
+
+# EC2 模块
+module "ec2" {
+  source = "./ec2"
+
+  vpc_id            = module.vpc.vpc_id
+  public_subnet_ids = module.vpc.public_subnet_ids
+  project_name      = var.project_name
+  environment       = var.environment
+  common_tags       = local.common_tags
+
+  # 可选：自定义配置
+  instance_type = "t3.small"
+  volume_size   = 30
+  custom_ports  = [8080, 3000] # 如果需要开放其他端口
+}
