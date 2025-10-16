@@ -321,11 +321,10 @@ jobs:
         run: |
           echo "=== 使用 sed 处理 Secret 模板 ==="
           
-          # 获取实际值并确保格式正确
+          # 获取实际值
           RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
           
-          # 关键修复：确保 RDS_HOST 不包含端口号
-          # RDS endpoint 可能包含端口，我们需要提取纯主机名
+          # 确保 RDS_HOST 不包含端口号
           if [[ "$RDS_ENDPOINT" == *":"* ]]; then
             RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
             echo "⚠️  RDS_ENDPOINT 包含端口，提取纯主机名: $RDS_HOST"
@@ -334,14 +333,6 @@ jobs:
           fi
           
           RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          
-          # 确保端口有效
-          if ! [[ "$RDS_PORT" =~ ^[0-9]+$ ]] || [ "$RDS_PORT" -lt 1 ] || [ "$RDS_PORT" -gt 65535 ]; then
-            echo "❌ 错误: RDS_PORT 格式无效: $RDS_PORT"
-            echo "使用默认端口 5432"
-            RDS_PORT="5432"
-          fi
-          
           RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
           RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
@@ -462,20 +453,6 @@ jobs:
           else
             echo "✅ 所有 Secret 文件处理成功"
           fi
-
-      - name: 🚀 Apply All Secrets and Run Migrations
-        run: |
-          cd k8s
-          
-          echo "应用所有 Kubernetes secrets..."
-          kubectl apply -f configs/rds-secret.yaml
-          kubectl apply -f configs/backend-secret.yaml
-          kubectl apply -f configs/community-db-secret.yaml
-          kubectl apply -f configs/auth-secret.yaml
-          kubectl apply -f configs/community-secret.yaml
-          kubectl apply -f configs/s3-secret.yaml
-          
-          echo "✅ 所有 secrets 应用成功"
 
       - name: 🔍 Validate Secret Configuration
         run: |
@@ -607,7 +584,36 @@ jobs:
       - name: 🚀 Deploy Frontend
         run: |
           cd k8s
-          kubectl apply -k .
+          
+          echo "=== 应用命名空间 ==="
+          kubectl apply -f namespaces/comic-website.yaml
+          
+          echo "=== 应用 Service Accounts ==="
+          kubectl apply -f service-accounts/
+          
+          echo "=== 应用 ConfigMaps ==="
+          kubectl apply -f configs/backend-config.yaml
+          kubectl apply -f configs/community-config.yaml
+          kubectl apply -f configs/frontend-config.yaml
+          
+          echo "=== 应用处理后的 Secrets ==="
+          kubectl apply -f configs/rds-secret.yaml
+          kubectl apply -f configs/backend-secret.yaml
+          kubectl apply -f configs/community-db-secret.yaml
+          kubectl apply -f configs/auth-secret.yaml
+          kubectl apply -f configs/community-secret.yaml
+          kubectl apply -f configs/s3-secret.yaml
+          
+          echo "=== 应用 Deployments ==="
+          kubectl apply -f deployments/
+          
+          echo "=== 应用 Services ==="
+          kubectl apply -f service/
+          
+          echo "=== 应用网络配置 ==="
+          kubectl apply -f networking/
+          
+          echo "✅ 所有资源部署完成"
       - name: 🔄 Update Frontend Image
         run: |
           FRONTEND_IMAGE="${{ needs.build-images.outputs.frontend_image }}"
