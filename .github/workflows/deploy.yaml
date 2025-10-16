@@ -499,7 +499,7 @@ jobs:
         run: |
           cd k8s
           kubectl apply -f service-accounts/community-service-account.yaml
-          kubectl apply -f configs/community-configmap.yaml
+          kubectl apply -f configs/community-config.yaml
           kubectl apply -f configs/community-db-secret.yaml
           kubectl apply -f configs/auth-secret.yaml
           kubectl apply -f deployments/community-deployment.yaml
