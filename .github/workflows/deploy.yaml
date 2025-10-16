@@ -338,6 +338,7 @@ jobs:
           JWT_SECRET="${{ secrets.JWT_SECRET }}"
           COMMUNITY_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.community_role_arn }}"
           S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
+          AWS_REGION="${{ env.AWS_REGION }}"
           
           echo "实际值:"
           echo "RDS_HOST: $RDS_HOST"
@@ -348,49 +349,66 @@ jobs:
           echo "COMMUNITY_DB_USERNAME: $COMMUNITY_DB_USERNAME"
           echo "COMMUNITY_DB_PASSWORD: [HIDDEN]"
           echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
+          echo "AWS_REGION: $AWS_REGION"
+          echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
           
           cd k8s/configs
           
-          echo "=== 处理前的 rds-secret.yaml 内容 ==="
-          cat rds-secret.yaml
-          
-          # 使用 sed 精确替换所有变量
-          echo "=== 使用 sed 替换变量 ==="
-          sed -i "s|\\\${RDS_HOST}|$RDS_HOST|g" rds-secret.yaml
-          sed -i "s|\\\${RDS_PORT}|$RDS_PORT|g" rds-secret.yaml
-          sed -i "s|\\\${RDS_DATABASE}|$RDS_DATABASE|g" rds-secret.yaml
-          sed -i "s|\\\${RDS_USERNAME}|$RDS_USERNAME|g" rds-secret.yaml
-          sed -i "s|\\\${RDS_PASSWORD}|$RDS_PASSWORD|g" rds-secret.yaml
-          
-          echo "=== 处理后的 rds-secret.yaml 内容 ==="
-          cat rds-secret.yaml
-          
-          # 处理其他 Secret 文件
-          echo "=== 处理其他 Secret 文件 ==="
+          # 处理所有 Secret 文件
           for file in *-secret.yaml; do
-            if [ "$file" != "rds-secret.yaml" ]; then
-              echo "处理文件: $file"
-              sed -i "s|\\\${COMMUNITY_DB_USERNAME}|$COMMUNITY_DB_USERNAME|g" "$file"
-              sed -i "s|\\\${COMMUNITY_DB_PASSWORD}|$COMMUNITY_DB_PASSWORD|g" "$file"
-              sed -i "s|\\\${COMMUNITY_DB_NAME}|$COMMUNITY_DB_NAME|g" "$file"
-              sed -i "s|\\\${JWT_SECRET}|$JWT_SECRET|g" "$file"
-              sed -i "s|\\\${COMMUNITY_ROLE_ARN}|$COMMUNITY_ROLE_ARN|g" "$file"
-              sed -i "s|\\\${S3_BUCKET_NAME}|$S3_BUCKET_NAME|g" "$file"
-              echo "✅ 处理完成: $file"
-            fi
+            echo "=== 处理文件: $file ==="
+            echo "处理前内容:"
+            cat "$file"
+            
+            # 备份原始文件
+            cp "$file" "$file.bak"
+            
+            # 替换标准格式 ${VARIABLE}
+            sed -i "s|\\\${RDS_HOST}|$RDS_HOST|g" "$file"
+            sed -i "s|\\\${RDS_PORT}|$RDS_PORT|g" "$file"
+            sed -i "s|\\\${RDS_DATABASE}|$RDS_DATABASE|g" "$file"
+            sed -i "s|\\\${RDS_USERNAME}|$RDS_USERNAME|g" "$file"
+            sed -i "s|\\\${RDS_PASSWORD}|$RDS_PASSWORD|g" "$file"
+            sed -i "s|\\\${RDS_ENDPOINT}|$RDS_ENDPOINT|g" "$file"
+            
+            # 替换 Community 数据库变量
+            sed -i "s|\\\${COMMUNITY_DB_USERNAME}|$COMMUNITY_DB_USERNAME|g" "$file"
+            sed -i "s|\\\${COMMUNITY_DB_PASSWORD}|$COMMUNITY_DB_PASSWORD|g" "$file"
+            sed -i "s|\\\${COMMUNITY_DB_NAME}|$COMMUNITY_DB_NAME|g" "$file"
+            
+            # 替换 JWT 和 AWS 变量
+            sed -i "s|\\\${JWT_SECRET}|$JWT_SECRET|g" "$file"
+            sed -i "s|\\\${COMMUNITY_ROLE_ARN}|$COMMUNITY_ROLE_ARN|g" "$file"
+            sed -i "s|\\\${S3_BUCKET_NAME}|$S3_BUCKET_NAME|g" "$file"
+            sed -i "s|\\\${AWS_REGION}|$AWS_REGION|g" "$file"
+            
+            # 替换带引号的格式 "***${VARIABLE}***"
+            sed -i "s|\"\\*\\*\\*\\\${RDS_ENDPOINT}\\*\\*\\*\"|\"${RDS_ENDPOINT}\"|g" "$file"
+            sed -i "s|\"\\*\\*\\*\\\${RDS_PASSWORD}\\*\\*\\*\"|\"${RDS_PASSWORD}\"|g" "$file"
+            sed -i "s|\"\\*\\*\\*\\\${COMMUNITY_DB_PASSWORD}\\*\\*\\*\"|\"${COMMUNITY_DB_PASSWORD}\"|g" "$file"
+            
+            echo "处理后内容:"
+            cat "$file"
+            echo "======================"
           done
 
       - name: 🔍 Verify Secret Processing
         run: |
           cd k8s/configs
           echo "=== 最终验证 ==="
-          echo "rds-secret.yaml 内容:"
-          cat rds-secret.yaml
-          echo ""
+          
+          # 显示所有文件内容
+          for file in *-secret.yaml; do
+            echo "$file 内容:"
+            cat "$file"
+            echo ""
+          done
+          
           echo "=== 检查未替换的变量 ==="
           UNRESOLVED_COUNT=0
           for file in *-secret.yaml; do
-            if grep -n '\${' "$file"; then
+            echo "检查文件: $file"
+            if grep -n -E '\$\{[A-Z_]+\}' "$file"; then
               echo "❌ 在 $file 中发现未替换的变量"
               UNRESOLVED_COUNT=$((UNRESOLVED_COUNT + 1))
             else
@@ -400,6 +418,13 @@ jobs:
           
           if [ $UNRESOLVED_COUNT -gt 0 ]; then
             echo "❌ Secret 处理失败，存在 $UNRESOLVED_COUNT 个文件有未替换的变量"
+            echo "=== 详细错误信息 ==="
+            for file in *-secret.yaml; do
+              if grep -n -E '\$\{[A-Z_]+\}' "$file"; then
+                echo "文件 $file 中的未替换变量:"
+                grep -n -E '\$\{[A-Z_]+\}' "$file"
+              fi
+            done
             exit 1
           else
             echo "✅ 所有 Secret 文件处理成功"
