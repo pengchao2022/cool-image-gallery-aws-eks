@@ -317,43 +317,29 @@ jobs:
           kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
 
-      - name: 🔧 Install envsubst
+      - name: 🔧 Process Secret Templates with sed
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gettext-base
-
-      - name: 🔍 Debug Terraform Outputs
-        run: |
-          echo "=== DEBUG: Terraform Outputs ==="
-          echo "RDS_ENDPOINT: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          echo "RDS_PORT: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          echo "RDS_USERNAME: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          echo "RDS_DATABASE: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          echo "RDS_PASSWORD: [HIDDEN]"
-
-      - name: 🔧 Process Secret Templates with Detailed Debugging
-        run: |
-          echo "=== 开始处理 Secret 模板 ==="
+          echo "=== 使用 sed 处理 Secret 模板 ==="
           
-          # 设置环境变量
-          export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-          export RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
-          export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
-          export RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
+          # 获取实际值
+          RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
+          RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
           
           # Community 数据库配置
-          export COMMUNITY_DB_USERNAME="${{ secrets.COMMUNITY_DB_USERNAME }}"
-          export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
-          export COMMUNITY_DB_NAME="${{ secrets.COMMUNITY_DB_NAME }}"
+          COMMUNITY_DB_USERNAME="${{ secrets.COMMUNITY_DB_USERNAME }}"
+          COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
+          COMMUNITY_DB_NAME="${{ secrets.COMMUNITY_DB_NAME }}"
           
           # JWT 和 AWS 配置
-          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
-          export COMMUNITY_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.community_role_arn }}"
-          export S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
+          JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          COMMUNITY_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.community_role_arn }}"
+          S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           
-          echo "=== 环境变量值 ==="
+          echo "实际值:"
           echo "RDS_HOST: $RDS_HOST"
           echo "RDS_PORT: $RDS_PORT"
           echo "RDS_USERNAME: $RDS_USERNAME"
@@ -362,64 +348,35 @@ jobs:
           echo "COMMUNITY_DB_USERNAME: $COMMUNITY_DB_USERNAME"
           echo "COMMUNITY_DB_PASSWORD: [HIDDEN]"
           echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
-          echo "JWT_SECRET: [HIDDEN]"
-          
-          echo "=== 当前目录结构 ==="
-          pwd
-          ls -la
-          echo "=== k8s 目录结构 ==="
-          ls -la k8s/
-          echo "=== configs 目录结构 ==="
-          ls -la k8s/configs/
           
           cd k8s/configs
           
           echo "=== 处理前的 rds-secret.yaml 内容 ==="
           cat rds-secret.yaml
           
-          echo "=== 测试 envsubst 功能 ==="
-          TEST_STRING="主机: \${RDS_HOST}, 端口: \${RDS_PORT}"
-          echo "测试字符串: $TEST_STRING"
-          echo "envsubst 结果: $(echo "$TEST_STRING" | envsubst)"
+          # 使用 sed 精确替换所有变量
+          echo "=== 使用 sed 替换变量 ==="
+          sed -i "s|\\\${RDS_HOST}|$RDS_HOST|g" rds-secret.yaml
+          sed -i "s|\\\${RDS_PORT}|$RDS_PORT|g" rds-secret.yaml
+          sed -i "s|\\\${RDS_DATABASE}|$RDS_DATABASE|g" rds-secret.yaml
+          sed -i "s|\\\${RDS_USERNAME}|$RDS_USERNAME|g" rds-secret.yaml
+          sed -i "s|\\\${RDS_PASSWORD}|$RDS_PASSWORD|g" rds-secret.yaml
           
-          echo "=== 开始处理 rds-secret.yaml ==="
-          # 创建临时文件处理
-          envsubst < rds-secret.yaml > rds-secret-processed.yaml
-          
-          echo "=== 处理后的文件内容 ==="
-          cat rds-secret-processed.yaml
-          
-          echo "=== 检查未替换的变量 ==="
-          UNRESOLVED_VARS=$(grep -n '\${' rds-secret-processed.yaml || true)
-          if [ -n "$UNRESOLVED_VARS" ]; then
-            echo "❌ 发现未替换的变量:"
-            echo "$UNRESOLVED_VARS"
-            echo "=== 详细调试信息 ==="
-            echo "环境变量列表:"
-            env | grep RDS_
-            echo "文件权限:"
-            ls -la rds-secret.yaml rds-secret-processed.yaml
-            exit 1
-          else
-            echo "✅ 所有变量已成功替换"
-          fi
-          
-          # 替换原文件
-          mv rds-secret-processed.yaml rds-secret.yaml
-          echo "✅ rds-secret.yaml 处理完成"
+          echo "=== 处理后的 rds-secret.yaml 内容 ==="
+          cat rds-secret.yaml
           
           # 处理其他 Secret 文件
           echo "=== 处理其他 Secret 文件 ==="
           for file in *-secret.yaml; do
             if [ "$file" != "rds-secret.yaml" ]; then
               echo "处理文件: $file"
-              echo "处理前内容:"
-              head -5 "$file"
-              envsubst < "$file" > "${file}.processed"
-              mv "${file}.processed" "$file"
-              echo "处理后内容:"
-              head -5 "$file"
-              echo "✅ $file 处理完成"
+              sed -i "s|\\\${COMMUNITY_DB_USERNAME}|$COMMUNITY_DB_USERNAME|g" "$file"
+              sed -i "s|\\\${COMMUNITY_DB_PASSWORD}|$COMMUNITY_DB_PASSWORD|g" "$file"
+              sed -i "s|\\\${COMMUNITY_DB_NAME}|$COMMUNITY_DB_NAME|g" "$file"
+              sed -i "s|\\\${JWT_SECRET}|$JWT_SECRET|g" "$file"
+              sed -i "s|\\\${COMMUNITY_ROLE_ARN}|$COMMUNITY_ROLE_ARN|g" "$file"
+              sed -i "s|\\\${S3_BUCKET_NAME}|$S3_BUCKET_NAME|g" "$file"
+              echo "✅ 处理完成: $file"
             fi
           done
 
@@ -430,20 +387,19 @@ jobs:
           echo "rds-secret.yaml 内容:"
           cat rds-secret.yaml
           echo ""
-          echo "=== 检查所有 Secret 文件的未替换变量 ==="
-          ERROR_FOUND=false
+          echo "=== 检查未替换的变量 ==="
+          UNRESOLVED_COUNT=0
           for file in *-secret.yaml; do
-            echo "检查文件: $file"
             if grep -n '\${' "$file"; then
               echo "❌ 在 $file 中发现未替换的变量"
-              ERROR_FOUND=true
+              UNRESOLVED_COUNT=$((UNRESOLVED_COUNT + 1))
             else
               echo "✅ $file - 所有变量已替换"
             fi
           done
           
-          if [ "$ERROR_FOUND" = "true" ]; then
-            echo "❌ Secret 处理失败，存在未替换的变量"
+          if [ $UNRESOLVED_COUNT -gt 0 ]; then
+            echo "❌ Secret 处理失败，存在 $UNRESOLVED_COUNT 个文件有未替换的变量"
             exit 1
           else
             echo "✅ 所有 Secret 文件处理成功"
