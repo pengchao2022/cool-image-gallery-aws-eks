@@ -219,39 +219,7 @@ jobs:
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
           echo "Building and pushing backend image: $BACKEND_IMAGE"
-          
-          echo "=== Backend 构建调试 ==="
-          echo "当前目录: $(pwd)"
-          echo "目录内容:"
-          ls -la
-          echo ""
-          echo "scripts 文件夹内容:"
-          ls -la scripts/ || echo "scripts 文件夹不存在"
-          echo ""
-          echo "scripts 文件列表:"
-          find scripts/ -type f 2>/dev/null || echo "没有找到 scripts 文件"
-          echo ""
-          echo "Dockerfile 内容:"
-          cat Dockerfile
-          
           docker build --no-cache -t $BACKEND_IMAGE .
-          
-          echo "=== Backend 镜像验证 ==="
-          echo "1. 检查镜像中的文件结构:"
-          docker run --rm $BACKEND_IMAGE ls -la /app/
-          echo ""
-          echo "2. 检查 scripts 文件夹:"
-          docker run --rm $BACKEND_IMAGE ls -la /app/scripts/ || echo "scripts 文件夹不存在"
-          echo ""
-          echo "3. 查找 migrate.js 文件:"
-          docker run --rm $BACKEND_IMAGE find /app -name "migrate.js" -type f 2>/dev/null || echo "migrate.js 文件不存在"
-          echo ""
-          echo "4. 查找 community-migration.sql 文件:"
-          docker run --rm $BACKEND_IMAGE find /app -name "community-migration.sql" -type f 2>/dev/null || echo "community-migration.sql 文件不存在"
-          echo ""
-          echo "5. 尝试运行 migrate.js:"
-          docker run --rm $BACKEND_IMAGE node -e "console.log('Node.js working'); try { require('fs').accessSync('/app/scripts/migrate.js'); console.log('migrate.js exists') } catch(e) { console.log('migrate.js missing:', e.message) }" || echo "无法运行 Node.js 检查"
-          
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
           echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
@@ -308,21 +276,6 @@ jobs:
         run: |
           sudo snap install kubectl --classic
 
-      - name: 🔍 Debug Migration Issue
-        run: |
-          echo "=== 检查本地文件结构 ==="
-          find . -name "migrate.js" -type f
-          echo ""
-          echo "=== 检查 backend 目录结构 ==="
-          cd backend
-          ls -la
-          echo ""
-          echo "=== 检查 scripts 文件夹 ==="
-          ls -la scripts/
-          echo ""
-          echo "=== 检查 Dockerfile ==="
-          cat Dockerfile
-
       - name: 🗃 Create Namespace
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
@@ -330,10 +283,8 @@ jobs:
       - name: 🧹 Clean Up Existing Database Jobs
         run: |
           kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          kubectl delete job database-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          kubectl delete job community-tables-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
 
       - name: 🔧 Update Kubernetes Secrets for Database
@@ -345,15 +296,16 @@ jobs:
           export JWT_SECRET="${{ secrets.JWT_SECRET }}"
           export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
-          export COMMUNITY_DB_NAME="communitydb"
-          export COMMUNITY_DB_USERNAME="community_user"
           export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
-          export COMMUNITY_JWT_SECRET="${{ secrets.COMMUNITY_JWT_SECRET }}"
+          
+          # 构建数据库连接字符串
+          export DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DATABASE}"
+          
+          envsubst < k8s/configs/backend-secret.yaml > k8s/configs/backend-secret.yaml.tmp
+          mv k8s/configs/backend-secret.yaml.tmp k8s/configs/backend-secret.yaml
           
           envsubst < k8s/configs/rds-secret.yaml > k8s/configs/rds-secret.yaml.tmp
           mv k8s/configs/rds-secret.yaml.tmp k8s/configs/rds-secret.yaml
-          envsubst < k8s/configs/backend-secret.yaml > k8s/configs/backend-secret.yaml.tmp
-          mv k8s/configs/backend-secret.yaml.tmp k8s/configs/backend-secret.yaml
 
       - name: 🚀 Apply Database Secrets
         run: |
@@ -370,56 +322,11 @@ jobs:
           BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
           
-          echo "Using backend image for migration: $BACKEND_IMAGE"
-          
-          # 先删除可能存在的旧 job
-          kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          sleep 5
-          
           # 使用 sed 替换镜像占位符
-          echo "=== 原始 db-migration-job.yaml 文件内容 ==="
-          cat k8s/migrations/db-migration-job.yaml
-          
-          # 使用 sed 替换 PLACEHOLDER_BACKEND_IMAGE
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
-          
-          # 验证替换结果
-          echo "=== 替换后的文件内容 ==="
-          cat k8s/migrations/db-migration-job-temp.yaml
-          echo ""
-          echo "=== 验证镜像字段 ==="
-          grep "image:" k8s/migrations/db-migration-job-temp.yaml
           
           # 应用迁移 job
           kubectl apply -f k8s/migrations/db-migration-job-temp.yaml
-          
-          echo "获取迁移 Pod 信息..."
-          kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
-          
-          # 等待 Pod 启动
-          echo "等待 Pod 启动..."
-          for i in {1..30}; do
-            POD_STATUS=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NotFound")
-            POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
-            
-            if [ "$POD_STATUS" = "Running" ] || [ "$POD_STATUS" = "Succeeded" ] || [ "$POD_STATUS" = "Failed" ]; then
-              echo "Pod 状态: $POD_STATUS"
-              break
-            fi
-            echo "等待 Pod 启动... ($i/30) - 当前状态: $POD_STATUS"
-            sleep 5
-          done
-          
-          if [ "$POD_NAME" != "not-found" ]; then
-            echo "迁移 Pod 名称: $POD_NAME"
-            echo "=== Pod 状态 ==="
-            kubectl describe pod $POD_NAME -n ${{ env.NAMESPACE }}
-            echo ""
-            echo "=== Pod 日志 ==="
-            kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --tail=50 || echo "无法获取日志，Pod 可能还在启动中"
-          else
-            echo "❌ 无法找到迁移 Pod"
-          fi
           
           echo "Waiting for database migration to complete..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
@@ -428,12 +335,7 @@ jobs:
             rm -f k8s/migrations/db-migration-job-temp.yaml
           else
             echo "❌ Database migration failed"
-            # 再次获取日志
-            POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
-            if [ "$POD_NAME" != "not-found" ]; then
-              echo "=== 最终 Pod 日志 ==="
-              kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --tail=100
-            fi
+            kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=50
             rm -f k8s/migrations/db-migration-job-temp.yaml
             exit 1
           fi
@@ -447,26 +349,8 @@ jobs:
           BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
           
-          echo "Using backend image for community migration: $BACKEND_IMAGE"
-          
-          # 先删除可能存在的旧 job
-          kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          sleep 5
-          
           # 使用 sed 替换镜像占位符
-          echo "=== 原始 community-schema-job.yaml 文件内容 ==="
-          cat k8s/migrations/community-schema-job.yaml
-          
-          # 使用 sed 替换 PLACEHOLDER_BACKEND_IMAGE
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/community-schema-job.yaml > k8s/migrations/community-schema-job-temp.yaml
-          
-          # 验证替换结果
-          echo "=== 替换后的文件内容 ==="
-          cat k8s/migrations/community-schema-job-temp.yaml
-          echo ""
-          echo "=== 验证镜像字段 ==="
-          grep "image:" k8s/migrations/community-schema-job-temp.yaml
           
           # 应用 community migration job
           kubectl apply -f k8s/migrations/community-schema-job-temp.yaml
@@ -555,12 +439,7 @@ jobs:
       - name: 🔄 Update Backend Deployment with Latest Image
         run: |
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
-          echo "Updating backend deployment with image: $BACKEND_IMAGE"
-          
-          # 使用 kubectl set image
           kubectl set image deployment/backend-deployment -n ${{ env.NAMESPACE }} backend=$BACKEND_IMAGE
-          
-          echo "✅ Backend image updated successfully"
       
       - name: 🚀 Deploy Backend Resources
         run: |
@@ -571,22 +450,6 @@ jobs:
       
       - name: ⏳ Wait for Backend Deployment
         run: kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
-      
-      - name: 🔍 Verify Backend Deployment
-        run: |
-          echo "=== 检查 Backend Pod 状态 ==="
-          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend
-          
-          echo "=== 检查当前使用的镜像 ==="
-          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}'
-          echo ""
-          
-          echo "=== 检查 Pod 日志 ==="
-          BACKEND_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
-          if [ "$BACKEND_POD" != "not-found" ]; then
-            echo "Backend Pod logs:"
-            kubectl logs $BACKEND_POD -n ${{ env.NAMESPACE }} --tail=20
-          fi
 
   deploy-community:
     name: "Deploy Community Service to EKS"
@@ -610,12 +473,7 @@ jobs:
       - name: 🔄 Update Community Deployment with Latest Image
         run: |
           COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
-          echo "Updating community deployment with image: $COMMUNITY_IMAGE"
-          
-          # 使用 kubectl set image 更新社区服务镜像
           kubectl set image deployment/community-deployment -n ${{ env.NAMESPACE }} community-service=$COMMUNITY_IMAGE
-          
-          echo "✅ Community image updated successfully"
       
       - name: 🚀 Deploy Community Resources
         run: |
@@ -655,32 +513,3 @@ jobs:
           echo "   ✅ Database Migrations: Complete"
           echo "🎉 Application is fully operational!"
           echo "================================================"
-
-  rollback-check:
-    name: "Rollback Check"
-    runs-on: ubuntu-latest
-    needs: [deploy-frontend, deploy-backend, deploy-community]
-    environment: production
-    if: always()
-
-    steps:
-      - name: 🔑 Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: ☸️ Update kubeconfig
-        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-      
-      - name: 🔍 Check Deployment Status
-        run: |
-          echo "=== 最终部署状态检查 ==="
-          kubectl get deployments -n ${{ env.NAMESPACE }}
-          echo ""
-          echo "=== Pod 状态 ==="
-          kubectl get pods -n ${{ env.NAMESPACE }}
-          echo ""
-          echo "=== 服务状态 ==="
-          kubectl get services -n ${{ env.NAMESPACE }}
