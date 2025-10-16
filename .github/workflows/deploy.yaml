@@ -104,8 +104,8 @@ jobs:
           ALB_URL=$(jq -r '.alb_url.value // empty' outputs.json)
           REDIS_HOST=$(jq -r '.redis_host.value // "redis-master.comic-website.svc.cluster.local"' outputs.json)
           REDIS_PORT=$(jq -r '.redis_port.value // "6379"' outputs.json)
-          COMMUNITY_DB_NAME="communitydb"
-          COMMUNITY_DB_USERNAME="community_user"
+          COMMUNITY_DB_NAME="${{ secrets.COMMUNITY_DB_NAME }}"
+          COMMUNITY_DB_USERNAME="${{ secrets.COMMUNITY_DB_USERNAME }}"
           
           if [ -z "$COMMUNITY_ECR_URL" ]; then
             echo "⚠️ WARNING: COMMUNITY_ECR_URL is empty, creating temporary ECR URL"
@@ -322,50 +322,138 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gettext-base
 
-      - name: 🔧 Process All Secret Templates
+      - name: 🔍 Debug Terraform Outputs
         run: |
-          # 设置所有环境变量
+          echo "=== DEBUG: Terraform Outputs ==="
+          echo "RDS_ENDPOINT: ${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          echo "RDS_PORT: ${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          echo "RDS_USERNAME: ${{ needs.terraform-infrastructure.outputs.rds_username }}"
+          echo "RDS_DATABASE: ${{ needs.terraform-infrastructure.outputs.rds_database }}"
+          echo "RDS_PASSWORD: [HIDDEN]"
+
+      - name: 🔧 Process Secret Templates with Detailed Debugging
+        run: |
+          echo "=== 开始处理 Secret 模板 ==="
+          
+          # 设置环境变量
           export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
+          export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           export RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           export RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
           
           # Community 数据库配置
-          export COMMUNITY_DB_USERNAME="community_user"
+          export COMMUNITY_DB_USERNAME="${{ secrets.COMMUNITY_DB_USERNAME }}"
           export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
-          export COMMUNITY_DB_NAME="communitydb"
+          export COMMUNITY_DB_NAME="${{ secrets.COMMUNITY_DB_NAME }}"
           
           # JWT 和 AWS 配置
           export JWT_SECRET="${{ secrets.JWT_SECRET }}"
           export COMMUNITY_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.community_role_arn }}"
           export S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           
-          # 构建数据库连接字符串
-          export DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DATABASE}"
-          export COMMUNITY_DATABASE_URL="postgresql://${COMMUNITY_DB_USERNAME}:${COMMUNITY_DB_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${COMMUNITY_DB_NAME}"
+          echo "=== 环境变量值 ==="
+          echo "RDS_HOST: $RDS_HOST"
+          echo "RDS_PORT: $RDS_PORT"
+          echo "RDS_USERNAME: $RDS_USERNAME"
+          echo "RDS_DATABASE: $RDS_DATABASE"
+          echo "RDS_PASSWORD: [HIDDEN]"
+          echo "COMMUNITY_DB_USERNAME: $COMMUNITY_DB_USERNAME"
+          echo "COMMUNITY_DB_PASSWORD: [HIDDEN]"
+          echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
+          echo "JWT_SECRET: [HIDDEN]"
           
-          cd k8s
+          echo "=== 当前目录结构 ==="
+          pwd
+          ls -la
+          echo "=== k8s 目录结构 ==="
+          ls -la k8s/
+          echo "=== configs 目录结构 ==="
+          ls -la k8s/configs/
           
-          # 处理所有使用环境变量的 secret 文件
-          echo "Processing secret templates with envsubst..."
-          for file in configs/*-secret.yaml; do
-            if [ -f "$file" ]; then
-              echo "Processing $file"
-              envsubst < "$file" > "${file}.tmp"
-              mv "${file}.tmp" "$file"
+          cd k8s/configs
+          
+          echo "=== 处理前的 rds-secret.yaml 内容 ==="
+          cat rds-secret.yaml
+          
+          echo "=== 测试 envsubst 功能 ==="
+          TEST_STRING="主机: \${RDS_HOST}, 端口: \${RDS_PORT}"
+          echo "测试字符串: $TEST_STRING"
+          echo "envsubst 结果: $(echo "$TEST_STRING" | envsubst)"
+          
+          echo "=== 开始处理 rds-secret.yaml ==="
+          # 创建临时文件处理
+          envsubst < rds-secret.yaml > rds-secret-processed.yaml
+          
+          echo "=== 处理后的文件内容 ==="
+          cat rds-secret-processed.yaml
+          
+          echo "=== 检查未替换的变量 ==="
+          UNRESOLVED_VARS=$(grep -n '\${' rds-secret-processed.yaml || true)
+          if [ -n "$UNRESOLVED_VARS" ]; then
+            echo "❌ 发现未替换的变量:"
+            echo "$UNRESOLVED_VARS"
+            echo "=== 详细调试信息 ==="
+            echo "环境变量列表:"
+            env | grep RDS_
+            echo "文件权限:"
+            ls -la rds-secret.yaml rds-secret-processed.yaml
+            exit 1
+          else
+            echo "✅ 所有变量已成功替换"
+          fi
+          
+          # 替换原文件
+          mv rds-secret-processed.yaml rds-secret.yaml
+          echo "✅ rds-secret.yaml 处理完成"
+          
+          # 处理其他 Secret 文件
+          echo "=== 处理其他 Secret 文件 ==="
+          for file in *-secret.yaml; do
+            if [ "$file" != "rds-secret.yaml" ]; then
+              echo "处理文件: $file"
+              echo "处理前内容:"
+              head -5 "$file"
+              envsubst < "$file" > "${file}.processed"
+              mv "${file}.processed" "$file"
+              echo "处理后内容:"
+              head -5 "$file"
+              echo "✅ $file 处理完成"
+            fi
+          done
+
+      - name: 🔍 Verify Secret Processing
+        run: |
+          cd k8s/configs
+          echo "=== 最终验证 ==="
+          echo "rds-secret.yaml 内容:"
+          cat rds-secret.yaml
+          echo ""
+          echo "=== 检查所有 Secret 文件的未替换变量 ==="
+          ERROR_FOUND=false
+          for file in *-secret.yaml; do
+            echo "检查文件: $file"
+            if grep -n '\${' "$file"; then
+              echo "❌ 在 $file 中发现未替换的变量"
+              ERROR_FOUND=true
+            else
+              echo "✅ $file - 所有变量已替换"
             fi
           done
           
-          echo "✅ All secret templates processed"
+          if [ "$ERROR_FOUND" = "true" ]; then
+            echo "❌ Secret 处理失败，存在未替换的变量"
+            exit 1
+          else
+            echo "✅ 所有 Secret 文件处理成功"
+          fi
 
       - name: 🚀 Apply All Secrets and Run Migrations
         run: |
           cd k8s
           
-          # 应用所有 secrets
-          echo "Applying all Kubernetes secrets..."
+          echo "应用所有 Kubernetes secrets..."
           kubectl apply -f configs/rds-secret.yaml
           kubectl apply -f configs/backend-secret.yaml
           kubectl apply -f configs/community-db-secret.yaml
@@ -373,11 +461,11 @@ jobs:
           kubectl apply -f configs/community-secret.yaml
           kubectl apply -f configs/s3-secret.yaml
           
-          echo "✅ All secrets applied successfully"
+          echo "✅ 所有 secrets 应用成功"
 
       - name: 🗃 Run Main Database Migrations
         run: |
-          echo "🚀 Running main database migration..."
+          echo "🚀 运行主数据库迁移..."
           
           # 动态更新 migration job 的镜像标签
           BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
@@ -390,21 +478,26 @@ jobs:
           # 应用迁移 job
           kubectl apply -f k8s/migrations/db-migration-job-temp.yaml
           
-          echo "Waiting for database migration to complete..."
-          if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Database migration successful"
+          echo "等待数据库迁移完成..."
+          if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=600s; then
+            echo "✅ 数据库迁移成功"
+            kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=20
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
             rm -f k8s/migrations/db-migration-job-temp.yaml
           else
-            echo "❌ Database migration failed"
+            echo "❌ 数据库迁移失败或超时"
+            echo "=== 迁移 Pod 日志 ==="
             kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=50
+            echo "=== 迁移 Pod 状态 ==="
+            kubectl describe job db-migration -n ${{ env.NAMESPACE }}
+            kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
             rm -f k8s/migrations/db-migration-job-temp.yaml
             exit 1
           fi
 
       - name: 🗃 Create Community Database
         run: |
-          echo "🚀 Creating Community database..."
+          echo "🚀 创建 Community 数据库..."
           
           # 动态更新 community migration job 的镜像标签
           BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
@@ -417,24 +510,24 @@ jobs:
           # 应用 community migration job
           kubectl apply -f k8s/migrations/community-schema-job-temp.yaml
 
-          echo "Waiting for Community database creation to complete..."
+          echo "等待 Community 数据库创建完成..."
           if kubectl wait --for=condition=complete job/community-db-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community database creation successful"
+            echo "✅ Community 数据库创建成功"
             kubectl delete job community-db-setup -n ${{ env.NAMESPACE }}
           else
-            echo "❌ Community database creation failed"
+            echo "❌ Community 数据库创建失败"
             kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }} --tail=50
             rm -f k8s/migrations/community-schema-job-temp.yaml
             exit 1
           fi
           
-          echo "Waiting for Community schema setup to complete..."
+          echo "等待 Community schema 设置完成..."
           if kubectl wait --for=condition=complete job/community-schema-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community schema setup successful"
+            echo "✅ Community schema 设置成功"
             kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }}
             rm -f k8s/migrations/community-schema-job-temp.yaml
           else
-            echo "❌ Community schema setup failed"
+            echo "❌ Community schema 设置失败"
             kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }} --tail=50
             rm -f k8s/migrations/community-schema-job-temp.yaml
             exit 1
@@ -442,7 +535,7 @@ jobs:
 
       - name: ✅ Verify Database Configuration
         run: |
-          echo "✅ Database configuration completed successfully"
+          echo "✅ 数据库配置完成"
 
   deploy-frontend:
     name: "Deploy Frontend Service to EKS"
