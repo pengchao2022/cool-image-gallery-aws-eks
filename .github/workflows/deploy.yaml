@@ -340,6 +340,10 @@ jobs:
           S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           AWS_REGION="${{ env.AWS_REGION }}"
           
+          # 构建 DATABASE_URL
+          DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_ENDPOINT}:${RDS_PORT}/${RDS_DATABASE}"
+          COMMUNITY_DATABASE_URL="postgresql://${COMMUNITY_DB_USERNAME}:${COMMUNITY_DB_PASSWORD}@${RDS_ENDPOINT}:${RDS_PORT}/${COMMUNITY_DB_NAME}"
+          
           echo "实际值:"
           echo "RDS_HOST: $RDS_HOST"
           echo "RDS_PORT: $RDS_PORT"
@@ -351,6 +355,8 @@ jobs:
           echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
           echo "AWS_REGION: $AWS_REGION"
           echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
+          echo "DATABASE_URL: [HIDDEN]"
+          echo "COMMUNITY_DATABASE_URL: [HIDDEN]"
           
           cd k8s/configs
           
@@ -371,6 +377,10 @@ jobs:
             sed -i "s|\\\${RDS_PASSWORD}|$RDS_PASSWORD|g" "$file"
             sed -i "s|\\\${RDS_ENDPOINT}|$RDS_ENDPOINT|g" "$file"
             
+            # 替换 DATABASE_URL 变量
+            sed -i "s|\\\${DATABASE_URL}|$DATABASE_URL|g" "$file"
+            sed -i "s|\\\${COMMUNITY_DATABASE_URL}|$COMMUNITY_DATABASE_URL|g" "$file"
+            
             # 替换 Community 数据库变量
             sed -i "s|\\\${COMMUNITY_DB_USERNAME}|$COMMUNITY_DB_USERNAME|g" "$file"
             sed -i "s|\\\${COMMUNITY_DB_PASSWORD}|$COMMUNITY_DB_PASSWORD|g" "$file"
@@ -386,6 +396,8 @@ jobs:
             sed -i "s|\"\\*\\*\\*\\\${RDS_ENDPOINT}\\*\\*\\*\"|\"${RDS_ENDPOINT}\"|g" "$file"
             sed -i "s|\"\\*\\*\\*\\\${RDS_PASSWORD}\\*\\*\\*\"|\"${RDS_PASSWORD}\"|g" "$file"
             sed -i "s|\"\\*\\*\\*\\\${COMMUNITY_DB_PASSWORD}\\*\\*\\*\"|\"${COMMUNITY_DB_PASSWORD}\"|g" "$file"
+            sed -i "s|\"\\*\\*\\*\\\${DATABASE_URL}\\*\\*\\*\"|\"${DATABASE_URL}\"|g" "$file"
+            sed -i "s|\"\\*\\*\\*\\\${COMMUNITY_DATABASE_URL}\\*\\*\\*\"|\"${COMMUNITY_DATABASE_URL}\"|g" "$file"
             
             echo "处理后内容:"
             cat "$file"
