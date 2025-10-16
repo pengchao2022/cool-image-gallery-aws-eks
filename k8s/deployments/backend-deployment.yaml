@@ -22,7 +22,55 @@ spec:
         ports:
         - containerPort: 3000
         env:
-        # ... [你的环境变量保持不变]
+        # 数据库配置
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: host
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: port
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: database
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rds-secret
+              key: password
+        # 应用配置
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"  # 改为 3000
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: backend-secret
+              key: jwt-secret
+        - name: JWT_EXPIRES_IN
+          value: "7d"
+        # AWS 配置
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            secretKeyRef:
+              name: s3-secret
+              key: bucket-name
+        # API 配置
+        - name: API_BASE_URL
+          value: "/api"
         resources:
           requests:
             memory: "256Mi"
@@ -33,16 +81,12 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: 3000
+            port: 3000  # 改为 3000
           initialDelaySeconds: 30
-          periodSeconds: 30      # 从 10 增加到 30
-          timeoutSeconds: 5      # 增加超时时间
-          failureThreshold: 5    # 增加失败阈值
+          periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 3000
-          initialDelaySeconds: 10  # 从 5 增加到 10
-          periodSeconds: 15        # 从 5 增加到 15
-          timeoutSeconds: 5        # 增加超时时间
-          failureThreshold: 5      # 增加失败阈值
+            port: 3000  # 改为 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
