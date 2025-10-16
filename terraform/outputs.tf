@@ -159,3 +159,8 @@ output "ssh_connection_command" {
   description = "SSH connection command"
   value       = "ssh -i ~/.ssh/id_rsa ubuntu@${module.ec2.ec2_public_ip}"
 }
+
+output "community_repository_url" {
+  description = "Community ECR repository URL"
+  value       = module.ecr.community_repository_url
+}
