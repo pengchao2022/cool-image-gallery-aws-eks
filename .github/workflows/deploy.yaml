@@ -136,6 +136,29 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
+      - name: 📊 Install Metrics Server
+        run: |
+          echo "Installing Metrics Server for resource monitoring..."
+          
+          # 安装 Metrics Server
+          kubectl apply -f k8s/monitoring/metrics-server.yaml
+          
+          # 等待 Metrics Server 启动
+          echo "Waiting for Metrics Server to be ready..."
+          sleep 30
+          
+          # 检查状态
+          kubectl wait --for=condition=available deployment/metrics-server -n kube-system --timeout=180s
+          
+          # 验证安装
+          echo "=== Metrics Server Pods ==="
+          kubectl get pods -n kube-system -l k8s-app=metrics-server
+          
+          echo "=== Metrics API Service ==="
+          kubectl get apiservice v1beta1.metrics.k8s.io
+          
+          echo "✅ Metrics Server installed successfully"
+
   build-images:
     name: "Build Docker Images"
     runs-on: ubuntu-latest
