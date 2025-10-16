@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: community-service
+  name: community-deployment
   namespace: comic-website
   labels:
     app: community-service
