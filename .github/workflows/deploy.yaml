@@ -371,16 +371,47 @@ jobs:
           
           echo "Using backend image for migration: $BACKEND_IMAGE"
           
-          # 使用 envsubst 动态替换镜像标签
+          # 先删除可能存在的旧 job
+          kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          sleep 5
+          
+          # 安装 envsubst 如果不存在
+          sudo apt-get update && sudo apt-get install -y gettext-base
+          
+          # 使用 envsubst 替换镜像占位符 - 确保正确导出变量
           export BACKEND_IMAGE="$BACKEND_IMAGE"
-          envsubst < k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
+          echo "BACKEND_IMAGE value: $BACKEND_IMAGE"
+          
+          # 检查原始文件
+          echo "=== 原始 db-migration-job.yaml 文件内容 ==="
+          cat k8s/migrations/db-migration-job.yaml
+          
+          # 使用 envsubst 替换
+          envsubst '${BACKEND_IMAGE}' < k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
+          
+          # 验证替换结果
+          echo "=== 替换后的 db-migration-job-temp.yaml 文件内容 ==="
+          cat k8s/migrations/db-migration-job-temp.yaml
+          echo ""
+          echo "=== 验证镜像字段 ==="
+          grep "image:" k8s/migrations/db-migration-job-temp.yaml
+          
+          # 应用迁移 job
           kubectl apply -f k8s/migrations/db-migration-job-temp.yaml
           
           echo "获取迁移 Pod 信息..."
           kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
           
-          # 等待一段时间让 Pod 启动
-          sleep 30
+          # 等待 Pod 启动
+          echo "等待 Pod 启动..."
+          for i in {1..30}; do
+            POD_STATUS=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NotFound")
+            if [ "$POD_STATUS" = "Running" ] || [ "$POD_STATUS" = "Succeeded" ] || [ "$POD_STATUS" = "Failed" ]; then
+              break
+            fi
+            echo "等待 Pod 启动... ($i/30)"
+            sleep 5
+          done
           
           # 获取 Pod 名称
           POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
@@ -509,9 +540,6 @@ jobs:
           # 方法1: 使用 kubectl set image (推荐)
           kubectl set image deployment/backend-deployment -n ${{ env.NAMESPACE }} backend=$BACKEND_IMAGE
           
-          # 方法2: 备选方案 - 使用 kubectl patch
-          # kubectl patch deployment backend-deployment -n ${{ env.NAMESPACE }} -p='{"spec":{"template":{"spec":{"containers":[{"name":"backend","image":"'"$BACKEND_IMAGE"'"}]}}}}'
-          
           echo "✅ Backend image updated successfully"
       
       - name: 🚀 Deploy Backend Resources
@@ -520,7 +548,6 @@ jobs:
           kubectl apply -f service-accounts/backend-service-account.yaml
           kubectl apply -f configs/backend-config.yaml
           kubectl apply -f service/backend-service.yaml
-          # 注意: 这里不直接应用 deployment，因为我们已经用最新镜像更新了它
       
       - name: ⏳ Wait for Backend Deployment
         run: kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
@@ -577,7 +604,6 @@ jobs:
           kubectl apply -f configs/community-configmap.yaml
           kubectl apply -f configs/community-secret.yaml
           kubectl apply -f service/community-service.yaml
-          # 注意: 这里不直接应用 deployment，因为我们已经用最新镜像更新了它
       
       - name: ⏳ Wait for Community Deployment
         run: kubectl rollout status deployment/community-deployment -n ${{ env.NAMESPACE }} --timeout=180s
@@ -610,7 +636,6 @@ jobs:
           echo "🎉 Application is fully operational!"
           echo "================================================"
 
-  # 新增: 自动回滚检查 Job
   rollback-check:
     name: "Rollback Check"
     runs-on: ubuntu-latest
