@@ -519,10 +519,10 @@ jobs:
       - name: 🔄 Update Community Deployment with Latest Image
         run: |
           COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
-          kubectl set image deployment/community-service -n ${{ env.NAMESPACE }} community-deployment=$COMMUNITY_IMAGE
+          kubectl set image deployment/community-deployment -n ${{ env.NAMESPACE }} community-service=$COMMUNITY_IMAGE
       
       - name: ⏳ Wait for Community Deployment
-        run: kubectl rollout status deployment/community-service -n ${{ env.NAMESPACE }} --timeout=180s
+        run: kubectl rollout status deployment/community-deployment -n ${{ env.NAMESPACE }} --timeout=180s
       
       - name: 🌐 Get ALB URL
         id: get-alb-url
