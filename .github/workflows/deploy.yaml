@@ -484,30 +484,34 @@ jobs:
     steps:
       - name: 🧩 Checkout code
         uses: actions/checkout@v4
+      
       - name: 🔑 Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+      
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-      
-      - name: 🔄 Update Community Deployment with Latest Image
-        run: |
-          COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
-          kubectl set image deployment/community-deployment -n ${{ env.NAMESPACE }} community-service=$COMMUNITY_IMAGE
       
       - name: 🚀 Deploy Community Resources
         run: |
           cd k8s
           kubectl apply -f service-accounts/community-service-account.yaml
           kubectl apply -f configs/community-configmap.yaml
-          kubectl apply -f configs/community-secret.yaml
+          kubectl apply -f configs/community-db-secret.yaml
+          kubectl apply -f configs/auth-secret.yaml
+          kubectl apply -f deployments/community-deployment.yaml
           kubectl apply -f service/community-service.yaml
       
+      - name: 🔄 Update Community Deployment with Latest Image
+        run: |
+          COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
+          kubectl set image deployment/community-service -n ${{ env.NAMESPACE }} community=$COMMUNITY_IMAGE
+      
       - name: ⏳ Wait for Community Deployment
-        run: kubectl rollout status deployment/community-deployment -n ${{ env.NAMESPACE }} --timeout=180s
+        run: kubectl rollout status deployment/community-service -n ${{ env.NAMESPACE }} --timeout=180s
       
       - name: 🌐 Get ALB URL
         id: get-alb-url
