@@ -15,7 +15,7 @@ resources:
 
   # Configs & Secrets
   - configs/backend-config.yaml
-  - configs/community-configmap.yaml
+  - configs/community-config.yaml
   - configs/community-db-secret.yaml      # 新增 - 使用占位符
   - configs/auth-secret.yaml              # 新增 - 使用占位符
   - configs/community-secret.yaml         # 新增 - 使用占位符
