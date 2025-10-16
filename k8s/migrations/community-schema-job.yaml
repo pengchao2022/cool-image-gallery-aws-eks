@@ -9,7 +9,7 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: community-db-setup
-        image: PLACEHOLDER_BACKEND_IMAGE  # 改为占位符
+        image: PLACEHOLDER_BACKEND_IMAGE
         command: ["/bin/sh"]
         args:
           - "-c"
@@ -91,7 +91,6 @@ spec:
       restartPolicy: OnFailure
   backoffLimit: 2
   activeDeadlineSeconds: 300
-
 ---
 apiVersion: batch/v1
 kind: Job
@@ -104,9 +103,30 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: community-schema-setup
-        image: PLACEHOLDER_BACKEND_IMAGE  # 改为占位符
-        command: ["node"]
-        args: ["scripts/migration.sql"]
+        image: PLACEHOLDER_BACKEND_IMAGE
+        command: ["/bin/sh"]
+        args:
+          - "-c"
+          - |
+            set -e
+            echo "🚀 Setting up Community database schema..."
+            
+            # 安装 PostgreSQL 客户端
+            echo "📦 Installing PostgreSQL client..."
+            apk add --no-cache postgresql-client
+            
+            # 等待数据库可用
+            echo "⏳ Waiting for Community database to be available..."
+            until pg_isready -h $RDS_HOST -p $RDS_PORT -U $RDS_USERNAME -d $RDS_DATABASE; do
+              echo "Waiting for database connection..."
+              sleep 2
+            done
+            
+            # 执行 SQL 迁移文件
+            echo "📦 Running community database migrations..."
+            echo "Found community-migration.sql, executing..."
+            PGPASSWORD=$RDS_PASSWORD psql -h $RDS_HOST -p $RDS_PORT -U $RDS_USERNAME -d $RDS_DATABASE -f /app/scripts/community-migration.sql
+            echo "✅ Community migrations completed successfully!"
         env:
         - name: RDS_HOST
           valueFrom:
