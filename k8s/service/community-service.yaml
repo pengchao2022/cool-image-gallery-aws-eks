@@ -5,26 +5,14 @@ metadata:
   namespace: comic-website
   labels:
     app: community-service
-    component: backend
-    environment: production
-  annotations:
-    # ALB 相关注解（如果需要外部访问）
-    alb.ingress.kubernetes.io/healthcheck-path: /health
-    alb.ingress.kubernetes.io/healthcheck-port: "3001"
-    alb.ingress.kubernetes.io/success-codes: "200,302"
-    # 如果需要启用 WebSocket
-    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=600
+    version: v1
 spec:
   selector:
     app: community-service
-    component: backend
+    version: v1
   ports:
-    - name: http
-      protocol: TCP
-      port: 80
-      targetPort: 3001
-    - name: websocket
-      protocol: TCP
-      port: 8080
-      targetPort: 3002
+  - name: http
+    port: 80
+    targetPort: 3002
+    protocol: TCP
   type: ClusterIP
