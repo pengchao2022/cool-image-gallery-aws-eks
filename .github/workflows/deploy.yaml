@@ -35,8 +35,8 @@ jobs:
       alb_url: ${{ steps.terraform-outputs.outputs.alb_url }}
       redis_host: ${{ steps.terraform-outputs.outputs.redis_host }}
       redis_port: ${{ steps.terraform-outputs.outputs.redis_port }}
-      community_database_name: ${{ steps.terraform-outputs.outputs.community_database_name }}
-      community_database_username: ${{ steps.terraform-outputs.outputs.community_database_username }}
+      community_database_name: ${{ secrets.COMMUNITY_DB_NAME }}
+      community_database_username: ${{ secrets.COMMUNITY_DB_USERNAME }}
 
     steps:
       - name: 🧩 Checkout code
@@ -104,8 +104,6 @@ jobs:
           ALB_URL=$(jq -r '.alb_url.value // empty' outputs.json)
           REDIS_HOST=$(jq -r '.redis_host.value // "redis-master.comic-website.svc.cluster.local"' outputs.json)
           REDIS_PORT=$(jq -r '.redis_port.value // "6379"' outputs.json)
-          COMMUNITY_DB_NAME="${{ secrets.COMMUNITY_DB_NAME }}"
-          COMMUNITY_DB_USERNAME="${{ secrets.COMMUNITY_DB_USERNAME }}"
           
           if [ -z "$COMMUNITY_ECR_URL" ]; then
             echo "⚠️ WARNING: COMMUNITY_ECR_URL is empty, creating temporary ECR URL"
@@ -129,8 +127,6 @@ jobs:
           echo "alb_url=$ALB_URL" >> $GITHUB_OUTPUT
           echo "redis_host=$REDIS_HOST" >> $GITHUB_OUTPUT
           echo "redis_port=$REDIS_PORT" >> $GITHUB_OUTPUT
-          echo "community_database_name=$COMMUNITY_DB_NAME" >> $GITHUB_OUTPUT
-          echo "community_database_username=$COMMUNITY_DB_USERNAME" >> $GITHUB_OUTPUT
 
       - name: ☸️ Update kubeconfig
         run: |
@@ -140,33 +136,13 @@ jobs:
         run: |
           echo "Checking if Metrics Server is already installed..."
           
-          # 检查 Metrics Server 是否已经存在
           if kubectl get deployment metrics-server -n kube-system > /dev/null 2>&1; then
             echo "✅ Metrics Server is already installed, skipping installation"
-            echo "=== Existing Metrics Server Status ==="
-            kubectl get pods -n kube-system -l k8s-app=metrics-server
-            echo "=== Metrics API Service Status ==="
-            kubectl get apiservice v1beta1.metrics.k8s.io
           else
             echo "📦 Installing Metrics Server for resource monitoring..."
-            
-            # 安装 Metrics Server
             kubectl apply -f k8s/monitoring/metrics-server.yaml
-            
-            # 等待 Metrics Server 启动
-            echo "Waiting for Metrics Server to be ready..."
             sleep 30
-            
-            # 检查状态
             kubectl wait --for=condition=available deployment/metrics-server -n kube-system --timeout=180s
-            
-            # 验证安装
-            echo "=== Metrics Server Pods ==="
-            kubectl get pods -n kube-system -l k8s-app=metrics-server
-            
-            echo "=== Metrics API Service ==="
-            kubectl get apiservice v1beta1.metrics.k8s.io
-            
             echo "✅ Metrics Server installed successfully"
           fi
 
@@ -212,19 +188,6 @@ jobs:
           BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           FRONTEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
           COMMUNITY_ECR_URL="${{ needs.terraform-infrastructure.outputs.community_ecr_url }}"
-          
-          if [ -z "$BACKEND_ECR_URL" ]; then
-            echo "❌ ERROR: BACKEND_ECR_URL is required but empty"
-            exit 1
-          fi
-          if [ -z "$FRONTEND_ECR_URL" ]; then
-            echo "❌ ERROR: FRONTEND_ECR_URL is required but empty"
-            exit 1
-          fi
-          if [ -z "$COMMUNITY_ECR_URL" ]; then
-            echo "❌ ERROR: COMMUNITY_ECR_URL is required but empty"
-            exit 1
-          fi
           
           echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
           echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
@@ -317,177 +280,91 @@ jobs:
           kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
 
-      - name: 🔧 Process Secret Templates with sed
+      - name: 🗂 Create Kubernetes Secrets Directly
         run: |
-          echo "=== 使用 sed 处理 Secret 模板 ==="
+          echo "=== 直接创建 Kubernetes Secrets ==="
           
-          # 获取实际值
+          # 获取 RDS 配置
           RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          
-          # 确保 RDS_HOST 不包含端口号
-          if [[ "$RDS_ENDPOINT" == *":"* ]]; then
-            RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
-            echo "⚠️  RDS_ENDPOINT 包含端口，提取纯主机名: $RDS_HOST"
-          else
-            RDS_HOST="$RDS_ENDPOINT"
-          fi
-          
+          RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
           
-          # Community 数据库配置
-          COMMUNITY_DB_USERNAME="${{ secrets.COMMUNITY_DB_USERNAME }}"
-          COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
-          COMMUNITY_DB_NAME="${{ secrets.COMMUNITY_DB_NAME }}"
+          # 验证端口配置
+          if ! [[ "$RDS_PORT" =~ ^[0-9]+$ ]]; then
+            echo "⚠️ RDS_PORT '$RDS_PORT' 不是有效数字，设置为默认 5432"
+            RDS_PORT="5432"
+          fi
           
-          # JWT 和 AWS 配置
-          JWT_SECRET="${{ secrets.JWT_SECRET }}"
-          COMMUNITY_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.community_role_arn }}"
-          S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
-          AWS_REGION="${{ env.AWS_REGION }}"
-          
-          # 构建正确的 DATABASE_URL
-          DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DATABASE}"
-          COMMUNITY_DATABASE_URL="postgresql://${COMMUNITY_DB_USERNAME}:${COMMUNITY_DB_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${COMMUNITY_DB_NAME}"
-          
-          echo "=== 实际配置值 ==="
-          echo "RDS_ENDPOINT (原始): $RDS_ENDPOINT"
-          echo "RDS_HOST (处理后): $RDS_HOST"
+          echo "RDS_HOST: $RDS_HOST"
           echo "RDS_PORT: $RDS_PORT"
           echo "RDS_USERNAME: $RDS_USERNAME"
           echo "RDS_DATABASE: $RDS_DATABASE"
-          echo "RDS_PASSWORD: [HIDDEN]"
-          echo "COMMUNITY_DB_USERNAME: $COMMUNITY_DB_USERNAME"
-          echo "COMMUNITY_DB_PASSWORD: [HIDDEN]"
-          echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
-          echo "AWS_REGION: $AWS_REGION"
-          echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
-          echo "DATABASE_URL: $DATABASE_URL"
-          echo "COMMUNITY_DATABASE_URL: $COMMUNITY_DATABASE_URL"
-          echo "=========================="
           
-          cd k8s/configs
+          # 1. 创建 RDS Secret
+          echo "创建 RDS Secret..."
+          kubectl create secret generic rds-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=host="$RDS_HOST" \
+            --from-literal=port="$RDS_PORT" \
+            --from-literal=username="$RDS_USERNAME" \
+            --from-literal=password="${{ secrets.DB_PASSWORD }}" \
+            --from-literal=database="$RDS_DATABASE" \
+            --dry-run=client -o yaml | kubectl apply -f -
           
-          # 处理所有 Secret 文件
-          for file in *-secret.yaml; do
-            echo "=== 处理文件: $file ==="
-            echo "处理前内容:"
-            cat "$file"
-            
-            # 备份原始文件
-            cp "$file" "$file.bak"
-            
-            # 关键修复：确保 RDS_HOST 替换正确（不包含端口）
-            sed -i "s|\\\${RDS_HOST}|$RDS_HOST|g" "$file"
-            sed -i "s|\\\${RDS_PORT}|$RDS_PORT|g" "$file"
-            sed -i "s|\\\${RDS_DATABASE}|$RDS_DATABASE|g" "$file"
-            sed -i "s|\\\${RDS_USERNAME}|$RDS_USERNAME|g" "$file"
-            sed -i "s|\\\${RDS_PASSWORD}|$RDS_PASSWORD|g" "$file"
-            
-            # 注意：RDS_ENDPOINT 也替换为 RDS_HOST，避免端口重复
-            sed -i "s|\\\${RDS_ENDPOINT}|$RDS_HOST|g" "$file"
-            
-            # 替换 DATABASE_URL 变量
-            sed -i "s|\\\${DATABASE_URL}|$DATABASE_URL|g" "$file"
-            sed -i "s|\\\${COMMUNITY_DATABASE_URL}|$COMMUNITY_DATABASE_URL|g" "$file"
-            
-            # 替换 Community 数据库变量
-            sed -i "s|\\\${COMMUNITY_DB_USERNAME}|$COMMUNITY_DB_USERNAME|g" "$file"
-            sed -i "s|\\\${COMMUNITY_DB_PASSWORD}|$COMMUNITY_DB_PASSWORD|g" "$file"
-            sed -i "s|\\\${COMMUNITY_DB_NAME}|$COMMUNITY_DB_NAME|g" "$file"
-            
-            # 替换 JWT 和 AWS 变量
-            sed -i "s|\\\${JWT_SECRET}|$JWT_SECRET|g" "$file"
-            sed -i "s|\\\${COMMUNITY_ROLE_ARN}|$COMMUNITY_ROLE_ARN|g" "$file"
-            sed -i "s|\\\${S3_BUCKET_NAME}|$S3_BUCKET_NAME|g" "$file"
-            sed -i "s|\\\${AWS_REGION}|$AWS_REGION|g" "$file"
-            
-            # 替换带引号的格式 "***${VARIABLE}***"
-            sed -i "s|\"\\*\\*\\*\\\${RDS_ENDPOINT}\\*\\*\\*\"|\"${RDS_HOST}\"|g" "$file"
-            sed -i "s|\"\\*\\*\\*\\\${RDS_PASSWORD}\\*\\*\\*\"|\"${RDS_PASSWORD}\"|g" "$file"
-            sed -i "s|\"\\*\\*\\*\\\${COMMUNITY_DB_PASSWORD}\\*\\*\\*\"|\"${COMMUNITY_DB_PASSWORD}\"|g" "$file"
-            sed -i "s|\"\\*\\*\\*\\\${DATABASE_URL}\\*\\*\\*\"|\"${DATABASE_URL}\"|g" "$file"
-            sed -i "s|\"\\*\\*\\*\\\${COMMUNITY_DATABASE_URL}\\*\\*\\*\"|\"${COMMUNITY_DATABASE_URL}\"|g" "$file"
-            
-            echo "处理后内容:"
-            cat "$file"
-            echo "======================"
-          done
+          # 2. 创建 Backend Secret
+          echo "创建 Backend Secret..."
+          DATABASE_URL="postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_HOST:$RDS_PORT/$RDS_DATABASE"
+          kubectl create secret generic backend-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=jwt-secret="${{ secrets.JWT_SECRET }}" \
+            --from-literal=database-url="$DATABASE_URL" \
+            --from-literal=community-db-password="${{ secrets.COMMUNITY_DB_PASSWORD }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # 3. 创建 Community DB Secret
+          echo "创建 Community DB Secret..."
+          COMMUNITY_DATABASE_URL="postgresql://${{ secrets.COMMUNITY_DB_USERNAME }}:${{ secrets.COMMUNITY_DB_PASSWORD }}@$RDS_HOST:$RDS_PORT/${{ secrets.COMMUNITY_DB_NAME }}"
+          kubectl create secret generic community-db-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=database-url="$COMMUNITY_DATABASE_URL" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # 4. 创建 Auth Secret
+          echo "创建 Auth Secret..."
+          kubectl create secret generic auth-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=jwt-secret="${{ secrets.JWT_SECRET }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # 5. 创建 S3 Secret
+          echo "创建 S3 Secret..."
+          kubectl create secret generic s3-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=bucket-name="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}" \
+            --from-literal=aws-region="${{ env.AWS_REGION }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # 6. 创建 Community Secret (如果需要)
+          echo "创建 Community Secret..."
+          kubectl create secret generic community-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=role-arn="${{ needs.terraform-infrastructure.outputs.community_role_arn }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ 所有 Secrets 创建完成"
 
-      - name: 🔍 Verify Secret Processing
+      - name: 🔍 Verify Secrets
         run: |
-          cd k8s/configs
-          echo "=== 最终验证 ==="
+          echo "=== 验证 Secrets ==="
+          kubectl get secrets -n ${{ env.NAMESPACE }}
           
-          # 显示所有文件内容
-          for file in *-secret.yaml; do
-            echo "$file 内容:"
-            cat "$file"
-            echo ""
-          done
+          echo "=== 验证 RDS Secret ==="
+          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data.port}' | base64 -d
+          echo
           
-          echo "=== 检查未替换的变量 ==="
-          UNRESOLVED_COUNT=0
-          for file in *-secret.yaml; do
-            echo "检查文件: $file"
-            if grep -n -E '\$\{[A-Z_]+\}' "$file"; then
-              echo "❌ 在 $file 中发现未替换的变量"
-              UNRESOLVED_COUNT=$((UNRESOLVED_COUNT + 1))
-            else
-              echo "✅ $file - 所有变量已替换"
-            fi
-          done
-          
-          if [ $UNRESOLVED_COUNT -gt 0 ]; then
-            echo "❌ Secret 处理失败，存在 $UNRESOLVED_COUNT 个文件有未替换的变量"
-            echo "=== 详细错误信息 ==="
-            for file in *-secret.yaml; do
-              if grep -n -E '\$\{[A-Z_]+\}' "$file"; then
-                echo "文件 $file 中的未替换变量:"
-                grep -n -E '\$\{[A-Z_]+\}' "$file"
-              fi
-            done
-            exit 1
-          else
-            echo "✅ 所有 Secret 文件处理成功"
-          fi
-
-      - name: 🔍 Validate Secret Configuration
-        run: |
-          echo "=== 验证 Secret 配置 ==="
-          
-          # 验证 RDS_HOST 不包含端口号
-          echo "=== 检查 RDS_HOST 配置 ==="
-          RDS_HOST_CONTENT=$(kubectl get secret rds-secret -n comic-website -o jsonpath='{.data.host}' | base64 -d)
-          if [[ "$RDS_HOST_CONTENT" == *":"* ]]; then
-            echo "❌ 错误: RDS_HOST 包含端口号: $RDS_HOST_CONTENT"
-            echo "RDS_HOST 应该只包含主机名，不包含端口"
-            exit 1
-          else
-            echo "✅ RDS_HOST 配置正确: $RDS_HOST_CONTENT"
-          fi
-          
-          # 验证 RDS_PORT 配置
-          RDS_PORT_CONTENT=$(kubectl get secret rds-secret -n comic-website -o jsonpath='{.data.port}' | base64 -d)
-          echo "✅ RDS_PORT 配置: $RDS_PORT_CONTENT"
-          
-          # 验证 DATABASE_URL 格式
-          echo "=== 检查 DATABASE_URL 配置 ==="
-          DATABASE_URL_CONTENT=$(kubectl get secret backend-secret -n comic-website -o jsonpath='{.data.database-url}' | base64 -d)
-          echo "DATABASE_URL: $DATABASE_URL_CONTENT"
-          
-          # 验证端口在 DATABASE_URL 中只出现一次
-          PORT_COUNT=$(echo "$DATABASE_URL_CONTENT" | grep -o ":5432" | wc -l)
-          if [ "$PORT_COUNT" -gt 1 ]; then
-            echo "❌ 错误: DATABASE_URL 中包含重复的端口号"
-            exit 1
-          else
-            echo "✅ DATABASE_URL 端口配置正确"
-          fi
-          
-          echo "✅ 所有 Secret 配置验证通过"
+          echo "✅ Secrets 验证完成"
 
       - name: 🗃 Run Main Database Migrations
         run: |
@@ -512,11 +389,8 @@ jobs:
             rm -f k8s/migrations/db-migration-job-temp.yaml
           else
             echo "❌ 数据库迁移失败或超时"
-            echo "=== 迁移 Pod 日志 ==="
             kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=50
-            echo "=== 迁移 Pod 状态 ==="
             kubectl describe job db-migration -n ${{ env.NAMESPACE }}
-            kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration
             rm -f k8s/migrations/db-migration-job-temp.yaml
             exit 1
           fi
@@ -559,10 +433,6 @@ jobs:
             exit 1
           fi
 
-      - name: ✅ Verify Database Configuration
-        run: |
-          echo "✅ 数据库配置完成"
-
   deploy-frontend:
     name: "Deploy Frontend Service to EKS"
     runs-on: ubuntu-latest
@@ -581,39 +451,16 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-      - name: 🚀 Deploy Frontend
+      - name: 🚀 Deploy Frontend Resources
         run: |
           cd k8s
-          
-          echo "=== 应用命名空间 ==="
           kubectl apply -f namespaces/comic-website.yaml
-          
-          echo "=== 应用 Service Accounts ==="
-          kubectl apply -f service-accounts/
-          
-          echo "=== 应用 ConfigMaps ==="
-          kubectl apply -f configs/backend-config.yaml
-          kubectl apply -f configs/community-config.yaml
+          kubectl apply -f service-accounts/frontend-service-account.yaml
           kubectl apply -f configs/frontend-config.yaml
-          
-          echo "=== 应用处理后的 Secrets ==="
-          kubectl apply -f configs/rds-secret.yaml
-          kubectl apply -f configs/backend-secret.yaml
-          kubectl apply -f configs/community-db-secret.yaml
-          kubectl apply -f configs/auth-secret.yaml
-          kubectl apply -f configs/community-secret.yaml
-          kubectl apply -f configs/s3-secret.yaml
-          
-          echo "=== 应用 Deployments ==="
-          kubectl apply -f deployments/
-          
-          echo "=== 应用 Services ==="
-          kubectl apply -f service/
-          
-          echo "=== 应用网络配置 ==="
-          kubectl apply -f networking/
-          
-          echo "✅ 所有资源部署完成"
+          kubectl apply -f service/frontend-service.yaml
+          kubectl apply -f networking/alb-ingress-class.yaml
+          kubectl apply -f networking/alb-ingress.yaml
+          kubectl apply -f deployments/frontend-deployment.yaml
       - name: 🔄 Update Frontend Image
         run: |
           FRONTEND_IMAGE="${{ needs.build-images.outputs.frontend_image }}"
@@ -672,10 +519,10 @@ jobs:
       - name: 🔄 Update Community Deployment with Latest Image
         run: |
           COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
-          kubectl set image deployment/community-deployment -n ${{ env.NAMESPACE }} community-service=$COMMUNITY_IMAGE
+          kubectl set image deployment/community-service -n ${{ env.NAMESPACE }} community-service=$COMMUNITY_IMAGE
       
       - name: ⏳ Wait for Community Deployment
-        run: kubectl rollout status deployment/community-deployment -n ${{ env.NAMESPACE }} --timeout=180s
+        run: kubectl rollout status deployment/community-service -n ${{ env.NAMESPACE }} --timeout=180s
       
       - name: 🌐 Get ALB URL
         id: get-alb-url
