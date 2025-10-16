@@ -321,10 +321,21 @@ jobs:
         run: |
           echo "=== 使用 sed 处理 Secret 模板 ==="
           
-          # 获取实际值
+          # 获取实际值并确保格式正确
           RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
-          RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
+          
+          # 解析 RDS_ENDPOINT，处理可能包含端口的情况
+          # RDS endpoint 通常只包含主机名，不包含端口
+          RDS_HOST="$RDS_ENDPOINT"
           RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
+          
+          # 确保端口有效
+          if ! [[ "$RDS_PORT" =~ ^[0-9]+$ ]] || [ "$RDS_PORT" -lt 1 ] || [ "$RDS_PORT" -gt 65535 ]; then
+            echo "❌ 错误: RDS_PORT 格式无效: $RDS_PORT"
+            echo "使用默认端口 5432"
+            RDS_PORT="5432"
+          fi
+          
           RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
           RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
@@ -340,9 +351,9 @@ jobs:
           S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           AWS_REGION="${{ env.AWS_REGION }}"
           
-          # 构建 DATABASE_URL
-          DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_ENDPOINT}:${RDS_PORT}/${RDS_DATABASE}"
-          COMMUNITY_DATABASE_URL="postgresql://${COMMUNITY_DB_USERNAME}:${COMMUNITY_DB_PASSWORD}@${RDS_ENDPOINT}:${RDS_PORT}/${COMMUNITY_DB_NAME}"
+          # 构建正确的 DATABASE_URL - 只使用一个端口
+          DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DATABASE}"
+          COMMUNITY_DATABASE_URL="postgresql://${COMMUNITY_DB_USERNAME}:${COMMUNITY_DB_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${COMMUNITY_DB_NAME}"
           
           echo "实际值:"
           echo "RDS_HOST: $RDS_HOST"
@@ -355,8 +366,8 @@ jobs:
           echo "COMMUNITY_DB_NAME: $COMMUNITY_DB_NAME"
           echo "AWS_REGION: $AWS_REGION"
           echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
-          echo "DATABASE_URL: [HIDDEN]"
-          echo "COMMUNITY_DATABASE_URL: [HIDDEN]"
+          echo "DATABASE_URL: $DATABASE_URL"
+          echo "COMMUNITY_DATABASE_URL: $COMMUNITY_DATABASE_URL"
           
           cd k8s/configs
           
@@ -375,7 +386,7 @@ jobs:
             sed -i "s|\\\${RDS_DATABASE}|$RDS_DATABASE|g" "$file"
             sed -i "s|\\\${RDS_USERNAME}|$RDS_USERNAME|g" "$file"
             sed -i "s|\\\${RDS_PASSWORD}|$RDS_PASSWORD|g" "$file"
-            sed -i "s|\\\${RDS_ENDPOINT}|$RDS_ENDPOINT|g" "$file"
+            sed -i "s|\\\${RDS_ENDPOINT}|$RDS_HOST|g" "$file"  # 注意：这里用 RDS_HOST 而不是 RDS_ENDPOINT
             
             # 替换 DATABASE_URL 变量
             sed -i "s|\\\${DATABASE_URL}|$DATABASE_URL|g" "$file"
@@ -393,7 +404,7 @@ jobs:
             sed -i "s|\\\${AWS_REGION}|$AWS_REGION|g" "$file"
             
             # 替换带引号的格式 "***${VARIABLE}***"
-            sed -i "s|\"\\*\\*\\*\\\${RDS_ENDPOINT}\\*\\*\\*\"|\"${RDS_ENDPOINT}\"|g" "$file"
+            sed -i "s|\"\\*\\*\\*\\\${RDS_ENDPOINT}\\*\\*\\*\"|\"${RDS_HOST}\"|g" "$file"
             sed -i "s|\"\\*\\*\\*\\\${RDS_PASSWORD}\\*\\*\\*\"|\"${RDS_PASSWORD}\"|g" "$file"
             sed -i "s|\"\\*\\*\\*\\\${COMMUNITY_DB_PASSWORD}\\*\\*\\*\"|\"${COMMUNITY_DB_PASSWORD}\"|g" "$file"
             sed -i "s|\"\\*\\*\\*\\\${DATABASE_URL}\\*\\*\\*\"|\"${DATABASE_URL}\"|g" "$file"
