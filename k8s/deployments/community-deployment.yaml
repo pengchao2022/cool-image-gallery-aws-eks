@@ -65,21 +65,19 @@ spec:
             memory: "512Mi"
             cpu: "500m"
         livenessProbe:
-          httpGet:
-            path: /health
+          tcpSocket:
             port: 3002
           initialDelaySeconds: 60
           periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
-          httpGet:
-            path: /health
+          tcpSocket:
             port: 3002
           initialDelaySeconds: 30
           periodSeconds: 15
-          timeoutSeconds: 10
-          failureThreshold: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
         volumeMounts:
         - name: aws-iam-token
           mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
