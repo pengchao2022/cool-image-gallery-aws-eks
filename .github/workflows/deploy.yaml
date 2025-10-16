@@ -324,9 +324,15 @@ jobs:
           # 获取实际值并确保格式正确
           RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
           
-          # 解析 RDS_ENDPOINT，处理可能包含端口的情况
-          # RDS endpoint 通常只包含主机名，不包含端口
-          RDS_HOST="$RDS_ENDPOINT"
+          # 关键修复：确保 RDS_HOST 不包含端口号
+          # RDS endpoint 可能包含端口，我们需要提取纯主机名
+          if [[ "$RDS_ENDPOINT" == *":"* ]]; then
+            RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
+            echo "⚠️  RDS_ENDPOINT 包含端口，提取纯主机名: $RDS_HOST"
+          else
+            RDS_HOST="$RDS_ENDPOINT"
+          fi
+          
           RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           
           # 确保端口有效
@@ -351,12 +357,13 @@ jobs:
           S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           AWS_REGION="${{ env.AWS_REGION }}"
           
-          # 构建正确的 DATABASE_URL - 只使用一个端口
+          # 构建正确的 DATABASE_URL
           DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DATABASE}"
           COMMUNITY_DATABASE_URL="postgresql://${COMMUNITY_DB_USERNAME}:${COMMUNITY_DB_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${COMMUNITY_DB_NAME}"
           
-          echo "实际值:"
-          echo "RDS_HOST: $RDS_HOST"
+          echo "=== 实际配置值 ==="
+          echo "RDS_ENDPOINT (原始): $RDS_ENDPOINT"
+          echo "RDS_HOST (处理后): $RDS_HOST"
           echo "RDS_PORT: $RDS_PORT"
           echo "RDS_USERNAME: $RDS_USERNAME"
           echo "RDS_DATABASE: $RDS_DATABASE"
@@ -368,6 +375,7 @@ jobs:
           echo "S3_BUCKET_NAME: $S3_BUCKET_NAME"
           echo "DATABASE_URL: $DATABASE_URL"
           echo "COMMUNITY_DATABASE_URL: $COMMUNITY_DATABASE_URL"
+          echo "=========================="
           
           cd k8s/configs
           
@@ -380,13 +388,15 @@ jobs:
             # 备份原始文件
             cp "$file" "$file.bak"
             
-            # 替换标准格式 ${VARIABLE}
+            # 关键修复：确保 RDS_HOST 替换正确（不包含端口）
             sed -i "s|\\\${RDS_HOST}|$RDS_HOST|g" "$file"
             sed -i "s|\\\${RDS_PORT}|$RDS_PORT|g" "$file"
             sed -i "s|\\\${RDS_DATABASE}|$RDS_DATABASE|g" "$file"
             sed -i "s|\\\${RDS_USERNAME}|$RDS_USERNAME|g" "$file"
             sed -i "s|\\\${RDS_PASSWORD}|$RDS_PASSWORD|g" "$file"
-            sed -i "s|\\\${RDS_ENDPOINT}|$RDS_HOST|g" "$file"  # 注意：这里用 RDS_HOST 而不是 RDS_ENDPOINT
+            
+            # 注意：RDS_ENDPOINT 也替换为 RDS_HOST，避免端口重复
+            sed -i "s|\\\${RDS_ENDPOINT}|$RDS_HOST|g" "$file"
             
             # 替换 DATABASE_URL 变量
             sed -i "s|\\\${DATABASE_URL}|$DATABASE_URL|g" "$file"
@@ -466,6 +476,41 @@ jobs:
           kubectl apply -f configs/s3-secret.yaml
           
           echo "✅ 所有 secrets 应用成功"
+
+      - name: 🔍 Validate Secret Configuration
+        run: |
+          echo "=== 验证 Secret 配置 ==="
+          
+          # 验证 RDS_HOST 不包含端口号
+          echo "=== 检查 RDS_HOST 配置 ==="
+          RDS_HOST_CONTENT=$(kubectl get secret rds-secret -n comic-website -o jsonpath='{.data.host}' | base64 -d)
+          if [[ "$RDS_HOST_CONTENT" == *":"* ]]; then
+            echo "❌ 错误: RDS_HOST 包含端口号: $RDS_HOST_CONTENT"
+            echo "RDS_HOST 应该只包含主机名，不包含端口"
+            exit 1
+          else
+            echo "✅ RDS_HOST 配置正确: $RDS_HOST_CONTENT"
+          fi
+          
+          # 验证 RDS_PORT 配置
+          RDS_PORT_CONTENT=$(kubectl get secret rds-secret -n comic-website -o jsonpath='{.data.port}' | base64 -d)
+          echo "✅ RDS_PORT 配置: $RDS_PORT_CONTENT"
+          
+          # 验证 DATABASE_URL 格式
+          echo "=== 检查 DATABASE_URL 配置 ==="
+          DATABASE_URL_CONTENT=$(kubectl get secret backend-secret -n comic-website -o jsonpath='{.data.database-url}' | base64 -d)
+          echo "DATABASE_URL: $DATABASE_URL_CONTENT"
+          
+          # 验证端口在 DATABASE_URL 中只出现一次
+          PORT_COUNT=$(echo "$DATABASE_URL_CONTENT" | grep -o ":5432" | wc -l)
+          if [ "$PORT_COUNT" -gt 1 ]; then
+            echo "❌ 错误: DATABASE_URL 中包含重复的端口号"
+            exit 1
+          else
+            echo "✅ DATABASE_URL 端口配置正确"
+          fi
+          
+          echo "✅ 所有 Secret 配置验证通过"
 
       - name: 🗃 Run Main Database Migrations
         run: |
