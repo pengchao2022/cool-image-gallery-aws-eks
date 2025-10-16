@@ -513,13 +513,15 @@ jobs:
           kubectl apply -f configs/community-config.yaml
           kubectl apply -f configs/community-db-secret.yaml
           kubectl apply -f configs/auth-secret.yaml
-          kubectl apply -f deployments/community-deployment.yaml
           kubectl apply -f service/community-service.yaml
-      
-      - name: 🔄 Update Community Deployment with Latest Image
-        run: |
+          
+          # 先创建 deployment（使用当前最新的镜像）
           COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
-          kubectl set image deployment/community-service -n ${{ env.NAMESPACE }} community-deployment=$COMMUNITY_IMAGE
+          echo "Creating community deployment with image: $COMMUNITY_IMAGE"
+          # 临时更新 deployment 文件中的镜像
+          sed "s|image:.*|image: $COMMUNITY_IMAGE|g" k8s/deployments/community-deployment.yaml > k8s/deployments/community-deployment-temp.yaml
+          kubectl apply -f k8s/deployments/community-deployment-temp.yaml
+          rm -f k8s/deployments/community-deployment-temp.yaml
       
       - name: ⏳ Wait for Community Deployment
         run: kubectl rollout status deployment/community-service -n ${{ env.NAMESPACE }} --timeout=180s
