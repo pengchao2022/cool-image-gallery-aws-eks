@@ -377,7 +377,7 @@ jobs:
           sleep 5
           
           # 使用 sed 替换镜像占位符
-          echo "=== 原始文件内容 ==="
+          echo "=== 原始 db-migration-job.yaml 文件内容 ==="
           cat k8s/migrations/db-migration-job.yaml
           
           # 使用 sed 替换 PLACEHOLDER_BACKEND_IMAGE
@@ -451,6 +451,7 @@ jobs:
           
           # 先删除可能存在的旧 job
           kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
           
           # 使用 sed 替换镜像占位符
@@ -474,55 +475,22 @@ jobs:
           if kubectl wait --for=condition=complete job/community-db-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
             echo "✅ Community database creation successful"
             kubectl delete job community-db-setup -n ${{ env.NAMESPACE }}
-            rm -f k8s/migrations/community-schema-job-temp.yaml
           else
             echo "❌ Community database creation failed"
             kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }} --tail=50
             rm -f k8s/migrations/community-schema-job-temp.yaml
             exit 1
           fi
-
-      - name: 🗃 Create Community Database Tables
-        run: |
-          echo "🚀 Creating Community database tables..."
           
-          # 动态更新 community tables migration job 的镜像标签
-          BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
-          BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
-          BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
-          
-          echo "Using backend image for community tables migration: $BACKEND_IMAGE"
-          
-          # 先删除可能存在的旧 job
-          kubectl delete job community-tables-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          sleep 5
-          
-          # 使用 sed 替换镜像占位符
-          echo "=== 原始 community-tables-job.yaml 文件内容 ==="
-          cat k8s/migrations/community-tables-job.yaml
-          
-          # 使用 sed 替换 PLACEHOLDER_BACKEND_IMAGE
-          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/community-tables-job.yaml > k8s/migrations/community-tables-job-temp.yaml
-          
-          # 验证替换结果
-          echo "=== 替换后的文件内容 ==="
-          cat k8s/migrations/community-tables-job-temp.yaml
-          echo ""
-          echo "=== 验证镜像字段 ==="
-          grep "image:" k8s/migrations/community-tables-job-temp.yaml
-          
-          # 应用 community tables migration job
-          kubectl apply -f k8s/migrations/community-tables-job-temp.yaml
-          
-          echo "Waiting for Community database table structure creation to complete..."
-          if kubectl wait --for=condition=complete job/community-tables-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community database table structure creation successful"
-            kubectl delete job community-tables-setup -n ${{ env.NAMESPACE }}
-            rm -f k8s/migrations/community-tables-job-temp.yaml
+          echo "Waiting for Community schema setup to complete..."
+          if kubectl wait --for=condition=complete job/community-schema-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
+            echo "✅ Community schema setup successful"
+            kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }}
+            rm -f k8s/migrations/community-schema-job-temp.yaml
           else
-            echo "❌ Community database table structure creation failed"
-            kubectl logs job/community-tables-setup -n ${{ env.NAMESPACE }} --tail=50
-            rm -f k8s/migrations/community-tables-job-temp.yaml
+            echo "❌ Community schema setup failed"
+            kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }} --tail=50
+            rm -f k8s/migrations/community-schema-job-temp.yaml
             exit 1
           fi
 

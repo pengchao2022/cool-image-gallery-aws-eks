@@ -1,4 +1,3 @@
-# k8s/migrations/community-schema-job.yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -10,7 +9,7 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: community-db-setup
-        image: 319998871902.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend:latest
+        image: PLACEHOLDER_BACKEND_IMAGE  # 改为占位符
         command: ["/bin/sh"]
         args:
           - "-c"
@@ -105,7 +104,7 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: community-schema-setup
-        image: 319998871902.dkr.ecr.us-east-1.amazonaws.com/comic-website-prod-backend:latest
+        image: PLACEHOLDER_BACKEND_IMAGE  # 改为占位符
         command: ["node"]
         args: ["scripts/migration.sql"]
         env:
