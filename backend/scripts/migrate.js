@@ -11,7 +11,7 @@ const { Client } = pg;
 // 数据库连接配置
 const dbConfig = {
   host: process.env.RDS_HOST || process.env.DB_HOST,
-  port: process.env.RDS_PORT || process.env.DB_PORT || 5432,
+  port: parseInt(process.env.RDS_PORT || process.env.DB_PORT || '5432'), // 转换为数字
   user: process.env.RDS_USERNAME || process.env.DB_USERNAME,
   password: process.env.RDS_PASSWORD || process.env.DB_PASSWORD,
   database: process.env.RDS_DATABASE || process.env.DB_NAME,
@@ -22,10 +22,17 @@ async function runMigration() {
   console.log('🚀 Starting database migration...');
   console.log('📊 Database configuration:');
   console.log(`   Host: ${dbConfig.host}`);
-  console.log(`   Port: ${dbConfig.port}`);
+  console.log(`   Port: ${dbConfig.port} (type: ${typeof dbConfig.port})`); // 添加类型检查
   console.log(`   Database: ${dbConfig.database}`);
   console.log(`   User: ${dbConfig.user}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  // 验证端口配置
+  if (isNaN(dbConfig.port) || dbConfig.port < 1 || dbConfig.port > 65535) {
+    console.error(`❌ Invalid port configuration: ${dbConfig.port}`);
+    console.error('Port must be a number between 1 and 65535');
+    process.exit(1);
+  }
 
   const client = new Client(dbConfig);
 
@@ -38,6 +45,10 @@ async function runMigration() {
     // 读取 SQL 文件
     const sqlFilePath = path.join(process.cwd(), 'scripts', 'migration.sql');
     console.log(`📖 Reading SQL file: ${sqlFilePath}`);
+    
+    if (!fs.existsSync(sqlFilePath)) {
+      throw new Error(`SQL file not found: ${sqlFilePath}`);
+    }
     
     const migrationSQL = fs.readFileSync(sqlFilePath, 'utf8');
     console.log('✅ SQL file loaded successfully');
