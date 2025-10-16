@@ -375,22 +375,15 @@ jobs:
           kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
           
-          # 安装 envsubst 如果不存在
-          sudo apt-get update && sudo apt-get install -y gettext-base
-          
-          # 使用 envsubst 替换镜像占位符 - 确保正确导出变量
-          export BACKEND_IMAGE="$BACKEND_IMAGE"
-          echo "BACKEND_IMAGE value: $BACKEND_IMAGE"
-          
-          # 检查原始文件
-          echo "=== 原始 db-migration-job.yaml 文件内容 ==="
+          # 使用 sed 替换镜像占位符 - 更可靠的方法
+          echo "=== 原始文件内容 ==="
           cat k8s/migrations/db-migration-job.yaml
           
-          # 使用 envsubst 替换
-          envsubst '${BACKEND_IMAGE}' < k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
+          # 使用 sed 替换 PLACEHOLDER_BACKEND_IMAGE
+          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
           
           # 验证替换结果
-          echo "=== 替换后的 db-migration-job-temp.yaml 文件内容 ==="
+          echo "=== 替换后的文件内容 ==="
           cat k8s/migrations/db-migration-job-temp.yaml
           echo ""
           echo "=== 验证镜像字段 ==="
@@ -406,15 +399,15 @@ jobs:
           echo "等待 Pod 启动..."
           for i in {1..30}; do
             POD_STATUS=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NotFound")
+            POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
+            
             if [ "$POD_STATUS" = "Running" ] || [ "$POD_STATUS" = "Succeeded" ] || [ "$POD_STATUS" = "Failed" ]; then
+              echo "Pod 状态: $POD_STATUS"
               break
             fi
-            echo "等待 Pod 启动... ($i/30)"
+            echo "等待 Pod 启动... ($i/30) - 当前状态: $POD_STATUS"
             sleep 5
           done
-          
-          # 获取 Pod 名称
-          POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l job-name=db-migration -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "not-found")
           
           if [ "$POD_NAME" != "not-found" ]; then
             echo "迁移 Pod 名称: $POD_NAME"
@@ -422,7 +415,7 @@ jobs:
             kubectl describe pod $POD_NAME -n ${{ env.NAMESPACE }}
             echo ""
             echo "=== Pod 日志 ==="
-            kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --tail=50
+            kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --tail=50 || echo "无法获取日志，Pod 可能还在启动中"
           else
             echo "❌ 无法找到迁移 Pod"
           fi
@@ -537,7 +530,7 @@ jobs:
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
           echo "Updating backend deployment with image: $BACKEND_IMAGE"
           
-          # 方法1: 使用 kubectl set image (推荐)
+          # 使用 kubectl set image
           kubectl set image deployment/backend-deployment -n ${{ env.NAMESPACE }} backend=$BACKEND_IMAGE
           
           echo "✅ Backend image updated successfully"
