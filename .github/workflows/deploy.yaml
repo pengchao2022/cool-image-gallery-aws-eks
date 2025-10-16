@@ -317,31 +317,63 @@ jobs:
           kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           sleep 5
 
-      - name: 🔧 Update Kubernetes Secrets for Database
+      - name: 🔧 Install envsubst
         run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext-base
+
+      - name: 🔧 Process All Secret Templates
+        run: |
+          # 设置所有环境变量
           export RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
           export RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           export RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           export RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
-          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
           export RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           export RDS_PASSWORD="${{ secrets.DB_PASSWORD }}"
+          
+          # Community 数据库配置
+          export COMMUNITY_DB_USERNAME="community_user"
           export COMMUNITY_DB_PASSWORD="${{ secrets.COMMUNITY_DB_PASSWORD }}"
+          export COMMUNITY_DB_NAME="communitydb"
+          
+          # JWT 和 AWS 配置
+          export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+          export COMMUNITY_ROLE_ARN="${{ needs.terraform-infrastructure.outputs.community_role_arn }}"
+          export S3_BUCKET_NAME="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}"
           
           # 构建数据库连接字符串
           export DATABASE_URL="postgresql://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DATABASE}"
+          export COMMUNITY_DATABASE_URL="postgresql://${COMMUNITY_DB_USERNAME}:${COMMUNITY_DB_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${COMMUNITY_DB_NAME}"
           
-          envsubst < k8s/configs/backend-secret.yaml > k8s/configs/backend-secret.yaml.tmp
-          mv k8s/configs/backend-secret.yaml.tmp k8s/configs/backend-secret.yaml
+          cd k8s
           
-          envsubst < k8s/configs/rds-secret.yaml > k8s/configs/rds-secret.yaml.tmp
-          mv k8s/configs/rds-secret.yaml.tmp k8s/configs/rds-secret.yaml
+          # 处理所有使用环境变量的 secret 文件
+          echo "Processing secret templates with envsubst..."
+          for file in configs/*-secret.yaml; do
+            if [ -f "$file" ]; then
+              echo "Processing $file"
+              envsubst < "$file" > "${file}.tmp"
+              mv "${file}.tmp" "$file"
+            fi
+          done
+          
+          echo "✅ All secret templates processed"
 
-      - name: 🚀 Apply Database Secrets
+      - name: 🚀 Apply All Secrets and Run Migrations
         run: |
           cd k8s
+          
+          # 应用所有 secrets
+          echo "Applying all Kubernetes secrets..."
           kubectl apply -f configs/rds-secret.yaml
           kubectl apply -f configs/backend-secret.yaml
+          kubectl apply -f configs/community-db-secret.yaml
+          kubectl apply -f configs/auth-secret.yaml
+          kubectl apply -f configs/community-secret.yaml
+          kubectl apply -f configs/s3-secret.yaml
+          
+          echo "✅ All secrets applied successfully"
 
       - name: 🗃 Run Main Database Migrations
         run: |
@@ -433,13 +465,7 @@ jobs:
       - name: 🚀 Deploy Frontend
         run: |
           cd k8s
-          kubectl apply -f namespaces/comic-website.yaml
-          kubectl apply -f service-accounts/frontend-service-account.yaml
-          kubectl apply -f configs/frontend-config.yaml
-          kubectl apply -f service/frontend-service.yaml
-          kubectl apply -f networking/alb-ingress-class.yaml
-          kubectl apply -f networking/alb-ingress.yaml
-          kubectl apply -f deployments/frontend-deployment.yaml
+          kubectl apply -k .
       - name: 🔄 Update Frontend Image
         run: |
           FRONTEND_IMAGE="${{ needs.build-images.outputs.frontend_image }}"
@@ -471,13 +497,6 @@ jobs:
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
           kubectl set image deployment/backend-deployment -n ${{ env.NAMESPACE }} backend=$BACKEND_IMAGE
       
-      - name: 🚀 Deploy Backend Resources
-        run: |
-          cd k8s
-          kubectl apply -f service-accounts/backend-service-account.yaml
-          kubectl apply -f configs/backend-config.yaml
-          kubectl apply -f service/backend-service.yaml
-      
       - name: ⏳ Wait for Backend Deployment
         run: kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
 
@@ -501,16 +520,6 @@ jobs:
       
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
-      
-      - name: 🚀 Deploy Community Resources
-        run: |
-          cd k8s
-          kubectl apply -f service-accounts/community-service-account.yaml
-          kubectl apply -f configs/community-config.yaml
-          kubectl apply -f configs/community-db-secret.yaml
-          kubectl apply -f configs/auth-secret.yaml
-          kubectl apply -f service/community-service.yaml
-          kubectl apply -f deployments/community-deployment.yaml
       
       - name: 🔄 Update Community Deployment with Latest Image
         run: |

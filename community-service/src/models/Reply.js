@@ -1,43 +1,42 @@
-const mongoose = require('mongoose');
+// src/models/Reply.js
+const pool = require('../config/database');
 
-const replySchema = new mongoose.Schema({
-  content: { 
-    type: String, 
-    required: true,
-    maxlength: 2000
+const Reply = {
+  async find(query = {}) {
+    try {
+      const { discussion } = query;
+      let sql = 'SELECT * FROM replies WHERE 1=1';
+      const params = [];
+      
+      if (discussion) {
+        sql += ' AND discussion_id = $1';
+        params.push(discussion);
+      }
+      
+      sql += ' ORDER BY created_at ASC';
+      
+      const result = await pool.query(sql, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in Reply.find:', error);
+      return [];
+    }
   },
-  author: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  },
-  authorName: {
-    type: String,
-    required: true
-  },
-  discussion: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Discussion', 
-    required: true 
-  },
-  parentReply: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Reply' 
-  },
-  likes: [{ 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User' 
-  }],
-  likeCount: {
-    type: Number,
-    default: 0
+
+  async create(replyData) {
+    try {
+      const { content, author, authorName, discussion } = replyData;
+      const result = await pool.query(
+        `INSERT INTO replies (content, author, author_name, discussion_id, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING *`,
+        [content, author, authorName, discussion]
+      );
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error in Reply.create:', error);
+      throw error;
+    }
   }
-}, { 
-  timestamps: true 
-});
+};
 
-// 索引
-replySchema.index({ discussion: 1, createdAt: 1 });
-replySchema.index({ author: 1, createdAt: -1 });
-
-module.exports = mongoose.model('Reply', replySchema);
+module.exports = Reply;

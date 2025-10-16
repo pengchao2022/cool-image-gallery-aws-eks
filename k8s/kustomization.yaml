@@ -16,8 +16,9 @@ resources:
   # Configs & Secrets
   - configs/backend-config.yaml
   - configs/community-configmap.yaml
-  - configs/community-db-secret.yaml    # 替换原来的 community-secret.yaml
-  - configs/auth-secret.yaml            # 新增的 auth secret
+  - configs/community-db-secret.yaml      # 新增 - 使用占位符
+  - configs/auth-secret.yaml              # 新增 - 使用占位符
+  - configs/community-secret.yaml         # 新增 - 使用占位符
   - configs/frontend-config.yaml
   - configs/rds-secret.yaml
   - configs/backend-secret.yaml

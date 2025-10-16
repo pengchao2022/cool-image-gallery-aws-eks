@@ -1,58 +1,97 @@
-const mongoose = require('mongoose');
+// src/models/Discussion.js
+const pool = require('../config/database');
 
-const discussionSchema = new mongoose.Schema({
-  title: { 
-    type: String, 
-    required: true,
-    trim: true,
-    maxlength: 200
+const Discussion = {
+  async find(query = {}) {
+    try {
+      const { page = 1, limit = 20, search } = query;
+      let sql = 'SELECT * FROM discussions WHERE 1=1';
+      const params = [];
+      let paramCount = 0;
+      
+      if (search) {
+        paramCount++;
+        sql += ` AND (title ILIKE $${paramCount} OR content ILIKE $${paramCount})`;
+        params.push(`%${search}%`);
+      }
+      
+      paramCount++;
+      paramCount++;
+      sql += ` ORDER BY created_at DESC LIMIT $${paramCount - 1} OFFSET $${paramCount}`;
+      params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
+      
+      console.log('Executing query:', sql, params);
+      const result = await pool.query(sql, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in Discussion.find:', error);
+      throw error;
+    }
   },
-  content: { 
-    type: String, 
-    required: true,
-    maxlength: 5000
+
+  async findById(id) {
+    try {
+      const result = await pool.query(
+        'SELECT * FROM discussions WHERE id = $1', 
+        [id]
+      );
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error in Discussion.findById:', error);
+      throw error;
+    }
   },
-  author: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+
+  async countDocuments(query = {}) {
+    try {
+      const { search } = query;
+      let sql = 'SELECT COUNT(*) FROM discussions WHERE 1=1';
+      const params = [];
+      
+      if (search) {
+        sql += ' AND (title ILIKE $1 OR content ILIKE $1)';
+        params.push(`%${search}%`);
+      }
+      
+      const result = await pool.query(sql, params);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      console.error('Error in Discussion.countDocuments:', error);
+      throw error;
+    }
   },
-  authorName: {
-    type: String,
-    required: true
+
+  async create(discussionData) {
+    try {
+      const { title, content, author, authorName, tags = [] } = discussionData;
+      const result = await pool.query(
+        `INSERT INTO discussions (title, content, author, author_name, tags, view_count, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) RETURNING *`,
+        [title, content, author, authorName, tags, 0]
+      );
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error in Discussion.create:', error);
+      throw error;
+    }
   },
-  tags: [{ 
-    type: String,
-    trim: true,
-    lowercase: true
-  }],
-  viewCount: { 
-    type: Number, 
-    default: 0 
+
+  async updateViewCount(id) {
+    try {
+      await pool.query(
+        'UPDATE discussions SET view_count = view_count + 1, updated_at = NOW() WHERE id = $1',
+        [id]
+      );
+    } catch (error) {
+      console.error('Error in Discussion.updateViewCount:', error);
+      throw error;
+    }
   },
-  replyCount: { 
-    type: Number, 
-    default: 0 
-  },
-  lastReplyAt: { 
-    type: Date, 
-    default: Date.now 
-  },
-  isPinned: { 
-    type: Boolean, 
-    default: false 
-  },
-  isLocked: { 
-    type: Boolean, 
-    default: false 
+
+  async save() {
+    // 为了兼容性保留空方法
+    return this;
   }
-}, { 
-  timestamps: true 
-});
+};
 
-// 索引
-discussionSchema.index({ createdAt: -1 });
-discussionSchema.index({ author: 1, createdAt: -1 });
-discussionSchema.index({ tags: 1 });
-
-module.exports = mongoose.model('Discussion', discussionSchema);
+module.exports = Discussion;
