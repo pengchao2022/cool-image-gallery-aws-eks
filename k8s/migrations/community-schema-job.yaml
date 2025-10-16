@@ -9,7 +9,7 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: community-db-setup
-        image: PLACEHOLDER_BACKEND_IMAGE
+        image: postgres:14-alpine
         command: ["/bin/sh"]
         args:
           - "-c"
@@ -17,66 +17,49 @@ spec:
             set -e
             echo "🚀 Starting Community database setup..."
             
-            # 从环境变量获取数据库连接信息
-            DB_HOST="$RDS_HOST"
-            DB_PORT="$RDS_PORT"
-            DB_USER="$RDS_USERNAME"
-            DB_PASSWORD="$RDS_PASSWORD"
-            MAIN_DB="$RDS_DATABASE"
-            COMMUNITY_DB="communitydb"
-            COMMUNITY_USER="community_user"
-            COMMUNITY_PASSWORD="$COMMUNITY_DB_PASSWORD"
-            
-            echo "📊 Database configuration:"
-            echo "   Host: $DB_HOST"
-            echo "   Port: $DB_PORT"
-            echo "   Main Database: $MAIN_DB"
-            echo "   Community Database: $COMMUNITY_DB"
-            echo "   Community User: $COMMUNITY_USER"
-            
-            # 安装 PostgreSQL 客户端
-            echo "📦 Installing PostgreSQL client..."
-            apk add --no-cache postgresql-client
-            
             # 等待数据库可用
             echo "⏳ Waiting for database to be available..."
-            until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER -d $MAIN_DB; do
+            until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME; do
               echo "Waiting for database connection..."
               sleep 2
             done
             
             # 创建 Community 数据库
             echo "🗃 Creating Community database..."
-            PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $MAIN_DB << EOF
+            PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME << EOF
             CREATE DATABASE $COMMUNITY_DB;
             EOF
             
             # 创建 Community 数据库用户
             echo "👤 Creating Community database user..."
-            PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $MAIN_DB << EOF
+            PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME << EOF
             CREATE USER $COMMUNITY_USER WITH PASSWORD '$COMMUNITY_PASSWORD';
             GRANT ALL PRIVILEGES ON DATABASE $COMMUNITY_DB TO $COMMUNITY_USER;
             EOF
             
             echo "✅ Community database setup completed successfully!"
         env:
-        - name: RDS_HOST
+        - name: DB_HOST
           valueFrom:
             secretKeyRef:
               name: rds-secret
               key: host
-        - name: RDS_PORT
+        - name: DB_PORT
           value: "5432"
-        - name: RDS_USERNAME
+        - name: DB_USER
           value: "comicadmin"
-        - name: RDS_PASSWORD
+        - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
               name: rds-secret
               key: password
-        - name: RDS_DATABASE
+        - name: DB_NAME
           value: "comicdb"
-        - name: COMMUNITY_DB_PASSWORD
+        - name: COMMUNITY_DB
+          value: "communitydb"
+        - name: COMMUNITY_USER
+          value: "community_user"
+        - name: COMMUNITY_PASSWORD
           valueFrom:
             secretKeyRef:
               name: backend-secret
@@ -103,7 +86,7 @@ spec:
       serviceAccountName: comic-backend-sa
       containers:
       - name: community-schema-setup
-        image: PLACEHOLDER_BACKEND_IMAGE
+        image: postgres:14-alpine
         command: ["/bin/sh"]
         args:
           - "-c"
@@ -111,41 +94,60 @@ spec:
             set -e
             echo "🚀 Setting up Community database schema..."
             
-            # 安装 PostgreSQL 客户端
-            echo "📦 Installing PostgreSQL client..."
-            apk add --no-cache postgresql-client
-            
             # 等待数据库可用
             echo "⏳ Waiting for Community database to be available..."
-            until pg_isready -h $RDS_HOST -p $RDS_PORT -U $RDS_USERNAME -d $RDS_DATABASE; do
+            until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME; do
               echo "Waiting for database connection..."
               sleep 2
             done
             
             # 执行 SQL 迁移文件
             echo "📦 Running community database migrations..."
-            echo "Found community-migration.sql, executing..."
-            PGPASSWORD=$RDS_PASSWORD psql -h $RDS_HOST -p $RDS_PORT -U $RDS_USERNAME -d $RDS_DATABASE -f /app/scripts/community-migration.sql
-            echo "✅ Community migrations completed successfully!"
+            
+            # 创建基本的社区表结构
+            PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME << EOF
+            -- 创建帖子表
+            CREATE TABLE IF NOT EXISTS posts (
+              id SERIAL PRIMARY KEY,
+              title VARCHAR(255) NOT NULL,
+              content TEXT,
+              author_id INTEGER,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            -- 创建评论表
+            CREATE TABLE IF NOT EXISTS comments (
+              id SERIAL PRIMARY KEY,
+              post_id INTEGER REFERENCES posts(id),
+              content TEXT,
+              author_id INTEGER,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            -- 为社区用户授予权限
+            GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $DB_USER;
+            GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $DB_USER;
+            EOF
+            
+            echo "✅ Community schema setup completed successfully!"
         env:
-        - name: RDS_HOST
+        - name: DB_HOST
           valueFrom:
             secretKeyRef:
               name: rds-secret
               key: host
-        - name: RDS_PORT
+        - name: DB_PORT
           value: "5432"
-        - name: RDS_DATABASE
-          value: "communitydb"
-        - name: RDS_USERNAME
+        - name: DB_USER
           value: "community_user"
-        - name: RDS_PASSWORD
+        - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
               name: backend-secret
               key: community-db-password
-        - name: NODE_ENV
-          value: "production"
+        - name: DB_NAME
+          value: "communitydb"
         resources:
           limits:
             cpu: "500m"
