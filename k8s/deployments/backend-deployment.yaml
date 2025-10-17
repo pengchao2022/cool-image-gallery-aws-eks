@@ -73,34 +73,37 @@ spec:
           value: "/api"
         resources:
           requests:
-            memory: "256Mi"
+            memory: "512Mi"  # 🔥 增加内存请求
             cpu: "250m"
           limits:
-            memory: "512Mi"
+            memory: "1Gi"    # 🔥 增加内存限制
             cpu: "500m"
-        # 🔥 优化的健康检查配置
-        livenessProbe:
-          httpGet:
-            path: /api/health  # 使用完整的 API 路径
-            port: 3000
-          initialDelaySeconds: 60  # 给应用更多启动时间
-          periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 3
-          successThreshold: 1
-        readinessProbe:
-          httpGet:
-            path: /api/health  # 使用完整的 API 路径
-            port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 15
-          timeoutSeconds: 5
-          failureThreshold: 3
-          successThreshold: 1
-        # 🔥 添加启动探针（推荐）
+        # 🔥 修正的健康检查配置
         startupProbe:
           httpGet:
-            path: /api/health
+            path: /health    # 🔥 修正：使用 /health 而不是 /api/health
             port: 3000
-          failureThreshold: 30  # 给应用最多 5 分钟启动时间 (30 * 10 = 300秒)
-          periodSeconds: 10
+          initialDelaySeconds: 10   # 启动后10秒开始检查
+          periodSeconds: 10         # 每10秒检查一次
+          failureThreshold: 30      # 最多尝试30次（300秒）
+          timeoutSeconds: 5
+        
+        readinessProbe:
+          httpGet:
+            path: /health    # 🔥 修正：使用 /health 而不是 /api/health
+            port: 3000
+          initialDelaySeconds: 5    # 启动探针通过后5秒开始
+          periodSeconds: 10         # 每10秒检查一次
+          timeoutSeconds: 5
+          failureThreshold: 3       # 连续失败3次才标记为未就绪
+          successThreshold: 1
+        
+        livenessProbe:
+          httpGet:
+            path: /health    # 🔥 修正：使用 /health 而不是 /api/health
+            port: 3000
+          initialDelaySeconds: 30   # 应用完全启动后30秒开始
+          periodSeconds: 30         # 每30秒检查一次
+          timeoutSeconds: 10
+          failureThreshold: 3       # 连续失败3次才重启容器
+          successThreshold: 1
