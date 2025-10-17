@@ -560,7 +560,7 @@ jobs:
           kubectl apply -f service/backend-service.yaml
           kubectl apply -f deployments/backend-deployment.yaml
       
-      # 🔥 新增：替换 Backend 镜像占位符
+      # 🔥 修改：使用正确的镜像标签替换
       - name: 🔄 Prepare Backend Deployment with Image
         run: |
           echo "=== 准备 Backend Deployment 镜像 ==="
@@ -570,12 +570,24 @@ jobs:
           echo "Backend 镜像: $BACKEND_IMAGE"
           echo "Backend 镜像标签: $BACKEND_IMAGE_TAG"
           
-          # 使用 sed 替换 deployment 中的镜像占位符
-          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/deployments/backend-deployment.yaml > k8s/deployments/backend-deployment-temp.yaml
+          # 检查镜像是否存在
+          echo "=== 检查镜像是否存在 ==="
+          if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
+            echo "✅ 镜像存在: $BACKEND_IMAGE"
+          else
+            echo "❌ 镜像不存在: $BACKEND_IMAGE"
+            echo "可用的镜像标签:"
+            aws ecr list-images --repository-name comic-website-prod-backend --region us-east-1 --query 'imageIds[].imageTag' --output table || true
+            exit 1
+          fi
+          
+          # 使用 sed 替换 deployment 中的镜像
+          echo "=== 替换 Backend Deployment 镜像 ==="
+          sed "s|image:.*|image: $BACKEND_IMAGE|g" k8s/deployments/backend-deployment.yaml > k8s/deployments/backend-deployment-temp.yaml
           
           # 验证生成的 YAML
           echo "=== 验证生成的 Backend Deployment YAML ==="
-          cat k8s/deployments/backend-deployment-temp.yaml | head -20
+          cat k8s/deployments/backend-deployment-temp.yaml | grep image:
           
           # 应用更新后的 deployment
           kubectl apply -f k8s/deployments/backend-deployment-temp.yaml
@@ -597,13 +609,15 @@ jobs:
           kubectl get replicasets -n ${{ env.NAMESPACE }} -l app=backend
           
           echo "4. 检查 Pod 事件:"
-          kubectl get events -n ${{ env.NAMESPACE }} --field-selector involvedObject.kind=Pod --sort-by='.lastTimestamp' | grep backend
+          kubectl get events -n ${{ env.NAMESPACE }} --field-selector involvedObject.kind=Pod --sort-by='.lastTimestamp' | grep backend || echo "无相关事件"
           
           echo "5. 检查新 Pod 的日志:"
-          NEW_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend --sort-by='.metadata.creationTimestamp' -o jsonpath='{.items[-1].metadata.name}')
+          NEW_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend --sort-by='.metadata.creationTimestamp' -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
           if [ -n "$NEW_POD" ]; then
             echo "检查最新 Pod ($NEW_POD) 的日志:"
             kubectl logs -n ${{ env.NAMESPACE }} $NEW_POD --tail=50 || echo "无法获取新 Pod 日志"
+            echo "检查最新 Pod ($NEW_POD) 的详情:"
+            kubectl describe pod -n ${{ env.NAMESPACE }} $NEW_POD | grep -A10 "Events:" || echo "无法获取 Pod 详情"
           fi
       
       # 🔥 改进：更智能的等待策略
@@ -629,7 +643,7 @@ jobs:
             if [ $((ELAPSED % 30)) -eq 0 ]; then
               echo "=== 详细状态 ==="
               kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend
-              kubectl describe deployment backend-deployment -n ${{ env.NAMESPACE }} | grep -A10 "Conditions:"
+              kubectl describe deployment backend-deployment -n ${{ env.NAMESPACE }} | grep -A10 "Conditions:" || true
             fi
             
             sleep $INTERVAL
