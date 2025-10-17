@@ -6,7 +6,7 @@ metadata:
   labels:
     app: backend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: backend
@@ -52,7 +52,7 @@ spec:
         - name: NODE_ENV
           value: "production"
         - name: PORT
-          value: "3000"  # 改为 3000
+          value: "3000"
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
@@ -78,15 +78,29 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+        # 🔥 优化的健康检查配置
         livenessProbe:
           httpGet:
-            path: /health
-            port: 3000  # 改为 3000
-          initialDelaySeconds: 30
-          periodSeconds: 10
+            path: /api/health  # 使用完整的 API 路径
+            port: 3000
+          initialDelaySeconds: 60  # 给应用更多启动时间
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
         readinessProbe:
           httpGet:
-            path: /health
-            port: 3000  # 改为 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
+            path: /api/health  # 使用完整的 API 路径
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        # 🔥 添加启动探针（推荐）
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          failureThreshold: 30  # 给应用最多 5 分钟启动时间 (30 * 10 = 300秒)
+          periodSeconds: 10
