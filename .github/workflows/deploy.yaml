@@ -552,13 +552,46 @@ jobs:
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
       
-      - name: 🔄 Update Backend Deployment with Latest Image
+      # 🔥 新增：部署 Backend 资源
+      - name: 🚀 Deploy Backend Resources
         run: |
+          cd k8s
+          kubectl apply -f service-accounts/backend-service-account.yaml
+          kubectl apply -f service/backend-service.yaml
+          kubectl apply -f deployments/backend-deployment.yaml
+      
+      # 🔥 新增：替换 Backend 镜像占位符
+      - name: 🔄 Prepare Backend Deployment with Image
+        run: |
+          echo "=== 准备 Backend Deployment 镜像 ==="
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
-          kubectl set image deployment/backend-deployment -n ${{ env.NAMESPACE }} backend=$BACKEND_IMAGE
+          BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
+          
+          echo "Backend 镜像: $BACKEND_IMAGE"
+          echo "Backend 镜像标签: $BACKEND_IMAGE_TAG"
+          
+          # 使用 sed 替换 deployment 中的镜像占位符
+          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/deployments/backend-deployment.yaml > k8s/deployments/backend-deployment-temp.yaml
+          
+          # 验证生成的 YAML
+          echo "=== 验证生成的 Backend Deployment YAML ==="
+          cat k8s/deployments/backend-deployment-temp.yaml | head -20
+          
+          # 应用更新后的 deployment
+          kubectl apply -f k8s/deployments/backend-deployment-temp.yaml
+          
+          # 清理临时文件
+          rm -f k8s/deployments/backend-deployment-temp.yaml
       
       - name: ⏳ Wait for Backend Deployment
         run: kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
+      
+      - name: 🔍 Verify Backend Pod
+        run: |
+          echo "=== 验证 Backend Pod 状态 ==="
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend
+          echo "=== Backend Pod 详情 ==="
+          kubectl describe pod -n ${{ env.NAMESPACE }} -l app=backend
 
   deploy-community:
     name: "Deploy Community Service to EKS"
