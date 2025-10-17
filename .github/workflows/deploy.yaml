@@ -366,6 +366,21 @@ jobs:
           
           echo "✅ Secrets 验证完成"
 
+      - name: 🔍 Check Migration Files
+        run: |
+          echo "=== 检查迁移文件 ==="
+          echo "当前目录:"
+          pwd
+          ls -la
+          echo "k8s 目录内容:"
+          ls -la k8s/
+          echo "migrations 目录内容:"
+          ls -la k8s/migrations/
+          echo "=== db-migration-job.yaml 内容 ==="
+          cat k8s/migrations/db-migration-job.yaml
+          echo "=== community-schema-job.yaml 内容 ==="
+          cat k8s/migrations/community-schema-job.yaml
+
       - name: 🗃 Run Main Database Migrations
         run: |
           echo "🚀 运行主数据库迁移..."
@@ -375,10 +390,40 @@ jobs:
           BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
           
+          echo "使用的镜像: $BACKEND_IMAGE"
+          echo "镜像标签: $BACKEND_IMAGE_TAG"
+          echo "ECR URL: $BACKEND_ECR_URL"
+          
           # 使用 sed 替换镜像占位符
+          echo "=== 替换镜像占位符 ==="
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
           
+          # 验证生成的 YAML 文件
+          echo "=== 生成的临时文件内容 ==="
+          cat k8s/migrations/db-migration-job-temp.yaml
+          
+          # 验证 YAML 语法
+          echo "=== 验证 YAML 语法 ==="
+          python3 -c "
+          import yaml
+          try:
+              with open('k8s/migrations/db-migration-job-temp.yaml', 'r') as f:
+                  yaml.safe_load(f)
+              print('✅ YAML 语法验证成功')
+          except Exception as e:
+              print(f'❌ YAML 语法验证失败: {e}')
+          exit(0)
+          " || true
+          
+          # 显示文件行号和特殊字符
+          echo "=== 文件行号显示（重点关注第14行）==="
+          cat -n k8s/migrations/db-migration-job-temp.yaml
+          
+          echo "=== 检查第14行特殊字符 ==="
+          sed -n '14p' k8s/migrations/db-migration-job-temp.yaml | cat -A
+          
           # 应用迁移 job
+          echo "=== 应用迁移 Job ==="
           kubectl apply -f k8s/migrations/db-migration-job-temp.yaml
           
           echo "等待数据库迁移完成..."
@@ -404,8 +449,28 @@ jobs:
           BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
           
+          echo "使用的 Community 镜像: $BACKEND_IMAGE"
+          
           # 使用 sed 替换镜像占位符
+          echo "=== 替换 Community 镜像占位符 ==="
           sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/community-schema-job.yaml > k8s/migrations/community-schema-job-temp.yaml
+          
+          # 验证生成的 YAML 文件
+          echo "=== 生成的 Community 临时文件内容 ==="
+          cat k8s/migrations/community-schema-job-temp.yaml
+          
+          # 验证 YAML 语法
+          echo "=== 验证 Community YAML 语法 ==="
+          python3 -c "
+          import yaml
+          try:
+              with open('k8s/migrations/community-schema-job-temp.yaml', 'r') as f:
+                  yaml.safe_load(f)
+              print('✅ Community YAML 语法验证成功')
+          except Exception as e:
+              print(f'❌ Community YAML 语法验证失败: {e}')
+          exit(0)
+          " || true
           
           # 应用 community migration job
           kubectl apply -f k8s/migrations/community-schema-job-temp.yaml
