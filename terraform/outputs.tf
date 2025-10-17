@@ -154,11 +154,12 @@ output "ec2_public_dns" {
   description = "EC2 instance public DNS name"
   value       = module.ec2.ec2_public_dns
 }
-
+/*
 output "ssh_connection_command" {
   description = "SSH connection command"
   value       = "ssh -i ~/.ssh/id_rsa ubuntu@${module.ec2.ec2_public_ip}"
 }
+*/
 
 output "community_repository_url" {
   description = "Community ECR repository URL"

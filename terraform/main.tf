@@ -116,6 +116,7 @@ locals {
 }
 
 # EC2 模块
+/*
 module "ec2" {
   source = "./ec2"
 
@@ -130,3 +131,4 @@ module "ec2" {
   volume_size   = 30
   custom_ports  = [8080, 3000] # 如果需要开放其他端口
 }
+*/
