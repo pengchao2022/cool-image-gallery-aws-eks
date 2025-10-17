@@ -35,8 +35,6 @@ jobs:
       alb_url: ${{ steps.terraform-outputs.outputs.alb_url }}
       redis_host: ${{ steps.terraform-outputs.outputs.redis_host }}
       redis_port: ${{ steps.terraform-outputs.outputs.redis_port }}
-      community_database_name: ${{ secrets.COMMUNITY_DB_NAME }}
-      community_database_username: ${{ secrets.COMMUNITY_DB_USERNAME }}
 
     steps:
       - name: 🧩 Checkout code
@@ -105,12 +103,6 @@ jobs:
           REDIS_HOST=$(jq -r '.redis_host.value // "redis-master.comic-website.svc.cluster.local"' outputs.json)
           REDIS_PORT=$(jq -r '.redis_port.value // "6379"' outputs.json)
           
-          if [ -z "$COMMUNITY_ECR_URL" ]; then
-            echo "⚠️ WARNING: COMMUNITY_ECR_URL is empty, creating temporary ECR URL"
-            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-            COMMUNITY_ECR_URL="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/comic-website-prod-community"
-          fi
-          
           echo "backend_ecr_url=$BACKEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "frontend_ecr_url=$FRONTEND_ECR_URL" >> $GITHUB_OUTPUT
           echo "community_ecr_url=$COMMUNITY_ECR_URL" >> $GITHUB_OUTPUT
@@ -132,18 +124,11 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
 
-      - name: 📊 Check and Install Metrics Server
+      - name: 📊 Install Metrics Server
         run: |
-          echo "Checking if Metrics Server is already installed..."
-          
-          if kubectl get deployment metrics-server -n kube-system > /dev/null 2>&1; then
-            echo "✅ Metrics Server is already installed, skipping installation"
-          else
-            echo "📦 Installing Metrics Server for resource monitoring..."
+          if ! kubectl get deployment metrics-server -n kube-system > /dev/null 2>&1; then
             kubectl apply -f k8s/monitoring/metrics-server.yaml
-            sleep 30
             kubectl wait --for=condition=available deployment/metrics-server -n kube-system --timeout=180s
-            echo "✅ Metrics Server installed successfully"
           fi
 
   build-images:
@@ -172,52 +157,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🔍 Get AWS Account ID and ECR Registry
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
-          ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
-          echo "ECR_REGISTRY=$ECR_REGISTRY" >> $GITHUB_ENV
-
       - name: 🔐 Login to ECR
         run: |
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}
 
-      - name: 🔍 Set ECR URLs
-        run: |
-          BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
-          FRONTEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}"
-          COMMUNITY_ECR_URL="${{ needs.terraform-infrastructure.outputs.community_ecr_url }}"
-          
-          echo "BACKEND_ECR_URL=$BACKEND_ECR_URL" >> $GITHUB_ENV
-          echo "FRONTEND_ECR_URL=$FRONTEND_ECR_URL" >> $GITHUB_ENV
-          echo "COMMUNITY_ECR_URL=$COMMUNITY_ECR_URL" >> $GITHUB_ENV
-
-      - name: 🏗 Check if Backend Image Exists
-        id: check-backend
-        run: |
-          IMAGE_TAG="${GITHUB_SHA:0:8}"
-          BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          
-          # 使用 AWS CLI 检查镜像是否存在
-          if aws ecr describe-images --repository-name comic-website-prod-backend --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-            echo "image_exists=true" >> $GITHUB_OUTPUT
-            echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
-            echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          else
-            echo "image_exists=false" >> $GITHUB_OUTPUT
-            echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
-            echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 🧱 Build Backend Image (if needed)
+      - name: 🧱 Build Backend Image
         id: build-backend
-        if: steps.check-backend.outputs.image_exists == 'false'
         run: |
           cd backend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
-          BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing backend image: $BACKEND_IMAGE"
+          BACKEND_IMAGE="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}:$IMAGE_TAG"
           docker build --no-cache -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
           echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
@@ -228,8 +177,7 @@ jobs:
         run: |
           cd frontend
           IMAGE_TAG="${GITHUB_SHA:0:8}"
-          FRONTEND_IMAGE="$FRONTEND_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing frontend image: $FRONTEND_IMAGE"
+          FRONTEND_IMAGE="${{ needs.terraform-infrastructure.outputs.frontend_ecr_url }}:$IMAGE_TAG"
           docker build -t $FRONTEND_IMAGE .
           docker push $FRONTEND_IMAGE
           echo "image_tag=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
@@ -240,8 +188,7 @@ jobs:
         run: |
           cd community-service
           IMAGE_TAG="${GITHUB_SHA:0:8}"
-          COMMUNITY_IMAGE="$COMMUNITY_ECR_URL:$IMAGE_TAG"
-          echo "Building and pushing community service image: $COMMUNITY_IMAGE"
+          COMMUNITY_IMAGE="${{ needs.terraform-infrastructure.outputs.community_ecr_url }}:$IMAGE_TAG"
           docker build -t $COMMUNITY_IMAGE .
           docker push $COMMUNITY_IMAGE
           echo "image_tag=$COMMUNITY_IMAGE" >> $GITHUB_OUTPUT
@@ -275,37 +222,21 @@ jobs:
         run: |
           kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: 🧹 Clean Up Existing Database Jobs
+      - name: 🧹 Clean Up Existing Jobs
         run: |
           kubectl delete job db-migration -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-db-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
           kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }} --ignore-not-found=true
-          sleep 5
 
-      - name: 🗂 Create Kubernetes Secrets Directly
+      - name: 🗂 Create Kubernetes Secrets
         run: |
-          echo "=== 直接创建 Kubernetes Secrets ==="
-          
-          # 获取 RDS 配置
           RDS_ENDPOINT="${{ needs.terraform-infrastructure.outputs.rds_endpoint }}"
           RDS_HOST=$(echo "$RDS_ENDPOINT" | cut -d':' -f1)
           RDS_PORT="${{ needs.terraform-infrastructure.outputs.rds_port }}"
           RDS_USERNAME="${{ needs.terraform-infrastructure.outputs.rds_username }}"
           RDS_DATABASE="${{ needs.terraform-infrastructure.outputs.rds_database }}"
           
-          # 验证端口配置
-          if ! [[ "$RDS_PORT" =~ ^[0-9]+$ ]]; then
-            echo "⚠️ RDS_PORT '$RDS_PORT' 不是有效数字，设置为默认 5432"
-            RDS_PORT="5432"
-          fi
-          
-          echo "RDS_HOST: $RDS_HOST"
-          echo "RDS_PORT: $RDS_PORT"
-          echo "RDS_USERNAME: $RDS_USERNAME"
-          echo "RDS_DATABASE: $RDS_DATABASE"
-          
-          # 1. 创建 RDS Secret
-          echo "创建 RDS Secret..."
+          # RDS Secret
           kubectl create secret generic rds-secret \
             --namespace=${{ env.NAMESPACE }} \
             --from-literal=host="$RDS_HOST" \
@@ -315,8 +246,7 @@ jobs:
             --from-literal=database="$RDS_DATABASE" \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          # 2. 创建 Backend Secret
-          echo "创建 Backend Secret..."
+          # Backend Secret
           DATABASE_URL="postgresql://$RDS_USERNAME:${{ secrets.DB_PASSWORD }}@$RDS_HOST:$RDS_PORT/$RDS_DATABASE"
           kubectl create secret generic backend-secret \
             --namespace=${{ env.NAMESPACE }} \
@@ -325,178 +255,64 @@ jobs:
             --from-literal=community-db-password="${{ secrets.COMMUNITY_DB_PASSWORD }}" \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          # 3. 创建 Community DB Secret
-          echo "创建 Community DB Secret..."
+          # Community DB Secret
           COMMUNITY_DATABASE_URL="postgresql://${{ secrets.COMMUNITY_DB_USERNAME }}:${{ secrets.COMMUNITY_DB_PASSWORD }}@$RDS_HOST:$RDS_PORT/${{ secrets.COMMUNITY_DB_NAME }}"
           kubectl create secret generic community-db-secret \
             --namespace=${{ env.NAMESPACE }} \
             --from-literal=database-url="$COMMUNITY_DATABASE_URL" \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          # 4. 创建 Auth Secret
-          echo "创建 Auth Secret..."
+          # Auth Secret
           kubectl create secret generic auth-secret \
             --namespace=${{ env.NAMESPACE }} \
             --from-literal=jwt-secret="${{ secrets.JWT_SECRET }}" \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          # 5. 创建 S3 Secret
-          echo "创建 S3 Secret..."
+          # S3 Secret
           kubectl create secret generic s3-secret \
             --namespace=${{ env.NAMESPACE }} \
             --from-literal=bucket-name="${{ needs.terraform-infrastructure.outputs.s3_bucket_name }}" \
             --from-literal=aws-region="${{ env.AWS_REGION }}" \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          # 6. 创建 Community Secret (如果需要)
-          echo "创建 Community Secret..."
+          # Community Secret
           kubectl create secret generic community-secret \
             --namespace=${{ env.NAMESPACE }} \
             --from-literal=role-arn="${{ needs.terraform-infrastructure.outputs.community_role_arn }}" \
             --dry-run=client -o yaml | kubectl apply -f -
-          
-          echo "✅ 所有 Secrets 创建完成"
-
-      - name: 🔍 Verify Secrets
-        run: |
-          echo "=== 验证 Secrets ==="
-          kubectl get secrets -n ${{ env.NAMESPACE }}
-          
-          echo "=== 验证 RDS Secret ==="
-          kubectl get secret rds-secret -n ${{ env.NAMESPACE }} -o jsonpath='{.data.port}' | base64 -d
-          echo
-          
-          echo "✅ Secrets 验证完成"
-
-      - name: 🔍 Check Migration Files
-        run: |
-          echo "=== 检查迁移文件 ==="
-          echo "当前目录:"
-          pwd
-          ls -la
-          echo "k8s 目录内容:"
-          ls -la k8s/
-          echo "migrations 目录内容:"
-          ls -la k8s/migrations/
-          echo "=== db-migration-job.yaml 内容 ==="
-          cat k8s/migrations/db-migration-job.yaml
-          echo "=== community-schema-job.yaml 内容 ==="
-          cat k8s/migrations/community-schema-job.yaml
 
       - name: 🗃 Run Main Database Migrations
         run: |
-          echo "🚀 运行主数据库迁移..."
-          
-          # 动态更新 migration job 的镜像标签
           BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
           BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
           
-          echo "使用的镜像: $BACKEND_IMAGE"
-          echo "镜像标签: $BACKEND_IMAGE_TAG"
-          echo "ECR URL: $BACKEND_ECR_URL"
+          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml | kubectl apply -f -
           
-          # 使用 sed 替换镜像占位符
-          echo "=== 替换镜像占位符 ==="
-          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/db-migration-job.yaml > k8s/migrations/db-migration-job-temp.yaml
-          
-          # 验证生成的 YAML 文件
-          echo "=== 生成的临时文件内容 ==="
-          cat k8s/migrations/db-migration-job-temp.yaml
-          
-          # 验证 YAML 语法
-          echo "=== 验证 YAML 语法 ==="
-          python3 -c "
-          import yaml
-          try:
-              with open('k8s/migrations/db-migration-job-temp.yaml', 'r') as f:
-                  yaml.safe_load(f)
-              print('✅ YAML 语法验证成功')
-          except Exception as e:
-              print(f'❌ YAML 语法验证失败: {e}')
-          exit(0)
-          " || true
-          
-          # 显示文件行号和特殊字符
-          echo "=== 文件行号显示（重点关注第14行）==="
-          cat -n k8s/migrations/db-migration-job-temp.yaml
-          
-          echo "=== 检查第14行特殊字符 ==="
-          sed -n '14p' k8s/migrations/db-migration-job-temp.yaml | cat -A
-          
-          # 应用迁移 job
-          echo "=== 应用迁移 Job ==="
-          kubectl apply -f k8s/migrations/db-migration-job-temp.yaml
-          
-          echo "等待数据库迁移完成..."
           if kubectl wait --for=condition=complete job/db-migration -n ${{ env.NAMESPACE }} --timeout=600s; then
-            echo "✅ 数据库迁移成功"
-            kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=20
             kubectl delete job db-migration -n ${{ env.NAMESPACE }}
-            rm -f k8s/migrations/db-migration-job-temp.yaml
           else
-            echo "❌ 数据库迁移失败或超时"
             kubectl logs job/db-migration -n ${{ env.NAMESPACE }} --tail=50
-            kubectl describe job db-migration -n ${{ env.NAMESPACE }}
-            rm -f k8s/migrations/db-migration-job-temp.yaml
             exit 1
           fi
 
       - name: 🗃 Create Community Database
         run: |
-          echo "🚀 创建 Community 数据库..."
-          
-          # 动态更新 community migration job 的镜像标签
           BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
           BACKEND_ECR_URL="${{ needs.terraform-infrastructure.outputs.backend_ecr_url }}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$BACKEND_IMAGE_TAG"
           
-          echo "使用的 Community 镜像: $BACKEND_IMAGE"
-          
-          # 使用 sed 替换镜像占位符
-          echo "=== 替换 Community 镜像占位符 ==="
-          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/community-schema-job.yaml > k8s/migrations/community-schema-job-temp.yaml
-          
-          # 验证生成的 YAML 文件
-          echo "=== 生成的 Community 临时文件内容 ==="
-          cat k8s/migrations/community-schema-job-temp.yaml
-          
-          # 验证 YAML 语法
-          echo "=== 验证 Community YAML 语法 ==="
-          python3 -c "
-          import yaml
-          try:
-              with open('k8s/migrations/community-schema-job-temp.yaml', 'r') as f:
-                  yaml.safe_load(f)
-              print('✅ Community YAML 语法验证成功')
-          except Exception as e:
-              print(f'❌ Community YAML 语法验证失败: {e}')
-          exit(0)
-          " || true
-          
-          # 应用 community migration job
-          kubectl apply -f k8s/migrations/community-schema-job-temp.yaml
+          sed "s|PLACEHOLDER_BACKEND_IMAGE|$BACKEND_IMAGE|g" k8s/migrations/community-schema-job.yaml | kubectl apply -f -
 
-          echo "等待 Community 数据库创建完成..."
           if kubectl wait --for=condition=complete job/community-db-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community 数据库创建成功"
             kubectl delete job community-db-setup -n ${{ env.NAMESPACE }}
           else
-            echo "❌ Community 数据库创建失败"
-            kubectl logs job/community-db-setup -n ${{ env.NAMESPACE }} --tail=50
-            rm -f k8s/migrations/community-schema-job-temp.yaml
             exit 1
           fi
           
-          echo "等待 Community schema 设置完成..."
           if kubectl wait --for=condition=complete job/community-schema-setup -n ${{ env.NAMESPACE }} --timeout=300s; then
-            echo "✅ Community schema 设置成功"
             kubectl delete job community-schema-setup -n ${{ env.NAMESPACE }}
-            rm -f k8s/migrations/community-schema-job-temp.yaml
           else
-            echo "❌ Community schema 设置失败"
-            kubectl logs job/community-schema-setup -n ${{ env.NAMESPACE }} --tail=50
-            rm -f k8s/migrations/community-schema-job-temp.yaml
             exit 1
           fi
 
@@ -554,7 +370,6 @@ jobs:
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
       
-      # 🔥 新增：部署 Backend 资源
       - name: 🚀 Deploy Backend Resources
         run: |
           cd k8s
@@ -562,121 +377,13 @@ jobs:
           kubectl apply -f service/backend-service.yaml
           kubectl apply -f deployments/backend-deployment.yaml
       
-      # 🔥 修改：修复镜像检查和使用正确的镜像标签
-      - name: 🔄 Prepare Backend Deployment with Image
+      - name: 🔄 Update Backend Image
         run: |
-          echo "=== 准备 Backend Deployment 镜像 ==="
           BACKEND_IMAGE="${{ needs.build-images.outputs.backend_image }}"
-          BACKEND_IMAGE_TAG="${{ needs.build-images.outputs.backend_image_tag }}"
-          
-          echo "Backend 镜像: $BACKEND_IMAGE"
-          echo "Backend 镜像标签: $BACKEND_IMAGE_TAG"
-          
-          # 🔥 修复：使用 AWS CLI 检查镜像是否存在
-          echo "=== 使用 AWS CLI 检查镜像是否存在 ==="
-          IMAGE_TAG="$BACKEND_IMAGE_TAG"
-          REPO_NAME="comic-website-prod-backend"
-          
-          # 使用 AWS CLI 检查镜像
-          if aws ecr describe-images --repository-name $REPO_NAME --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-            echo "✅ 镜像存在: $BACKEND_IMAGE"
-          else
-            echo "❌ 镜像不存在: $BACKEND_IMAGE"
-            echo "可用的镜像标签:"
-            aws ecr list-images --repository-name $REPO_NAME --region ${{ env.AWS_REGION }} --query 'imageIds[].imageTag' --output table
-            exit 1
-          fi
-          
-          # 🔥 修复：使用正确的 sed 命令替换镜像
-          echo "=== 替换 Backend Deployment 镜像 ==="
-          
-          # 先备份原文件
-          cp k8s/deployments/backend-deployment.yaml k8s/deployments/backend-deployment.yaml.backup
-          
-          # 使用 sed 替换镜像（更精确的匹配）
-          sed -i "s|image:.*comic-website-prod-backend.*|image: $BACKEND_IMAGE|g" k8s/deployments/backend-deployment.yaml
-          
-          # 验证替换结果
-          echo "=== 验证镜像替换结果 ==="
-          echo "替换后的镜像行:"
-          grep "image:" k8s/deployments/backend-deployment.yaml
-          
-          # 应用更新后的 deployment
-          kubectl apply -f k8s/deployments/backend-deployment.yaml
-          
-          # 恢复备份文件
-          mv k8s/deployments/backend-deployment.yaml.backup k8s/deployments/backend-deployment.yaml
-          
-          echo "✅ Backend Deployment 镜像更新完成"
+          kubectl set image deployment/backend-deployment -n ${{ env.NAMESPACE }} backend=$BACKEND_IMAGE
       
-      # 🔥 新增：详细的部署诊断
-      - name: 🔍 Debug Backend Deployment
-        run: |
-          echo "=== Backend Deployment 诊断信息 ==="
-          echo "1. 检查 Deployment 状态:"
-          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o wide
-          
-          echo "2. 检查 Pod 状态:"
-          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o wide
-          
-          echo "3. 检查 ReplicaSet 状态:"
-          kubectl get replicasets -n ${{ env.NAMESPACE }} -l app=backend
-          
-          echo "4. 检查 Pod 事件:"
-          kubectl get events -n ${{ env.NAMESPACE }} --field-selector involvedObject.kind=Pod --sort-by='.lastTimestamp' | grep backend || echo "无相关事件"
-          
-          echo "5. 检查新 Pod 的日志:"
-          NEW_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend --sort-by='.metadata.creationTimestamp' -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
-          if [ -n "$NEW_POD" ]; then
-            echo "检查最新 Pod ($NEW_POD) 的日志:"
-            kubectl logs -n ${{ env.NAMESPACE }} $NEW_POD --tail=50 || echo "无法获取新 Pod 日志"
-            echo "检查最新 Pod ($NEW_POD) 的详情:"
-            kubectl describe pod -n ${{ env.NAMESPACE }} $NEW_POD | grep -A10 "Events:" || echo "无法获取 Pod 详情"
-          fi
-      
-      # 🔥 改进：更智能的等待策略
       - name: ⏳ Wait for Backend Deployment
-        run: |
-          echo "=== 等待 Backend Deployment 就绪 ==="
-          TIMEOUT=600
-          INTERVAL=10
-          ELAPSED=0
-          
-          while [ $ELAPSED -lt $TIMEOUT ]; do
-            STATUS=$(kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=10s 2>&1 || true)
-            
-            if echo "$STATUS" | grep -q "successfully rolled out"; then
-              echo "✅ Backend Deployment 成功"
-              exit 0
-            fi
-            
-            echo "⏰ 仍在等待... ($ELAPSED/$TIMEOUT 秒)"
-            echo "当前状态: $STATUS"
-            
-            # 每30秒显示详细状态
-            if [ $((ELAPSED % 30)) -eq 0 ]; then
-              echo "=== 详细状态 ==="
-              kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend
-              kubectl describe deployment backend-deployment -n ${{ env.NAMESPACE }} | grep -A10 "Conditions:" || true
-            fi
-            
-            sleep $INTERVAL
-            ELAPSED=$((ELAPSED + INTERVAL))
-          done
-          
-          echo "❌ Backend Deployment 超时"
-          echo "=== 最终诊断信息 ==="
-          kubectl describe deployment backend-deployment -n ${{ env.NAMESPACE }}
-          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o wide
-          kubectl logs -n ${{ env.NAMESPACE }} -l app=backend --tail=100
-          exit 1
-      
-      - name: 🔍 Verify Backend Pod
-        run: |
-          echo "=== 验证 Backend Pod 状态 ==="
-          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend
-          echo "=== Backend Pod 详情 ==="
-          kubectl describe pod -n ${{ env.NAMESPACE }} -l app=backend
+        run: kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
 
   deploy-community:
     name: "Deploy Community Service to EKS"
@@ -699,7 +406,6 @@ jobs:
       - name: ☸️ Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
       
-      # 🔥 新增：部署 Community 资源
       - name: 🚀 Deploy Community Resources
         run: |
           cd k8s
@@ -707,38 +413,13 @@ jobs:
           kubectl apply -f service/community-service.yaml
           kubectl apply -f deployments/community-deployment.yaml
       
-      # 🔥 新增：替换 Community 镜像占位符
-      - name: 🔄 Prepare Community Deployment with Image
+      - name: 🔄 Update Community Image
         run: |
-          echo "=== 准备 Community Deployment 镜像 ==="
           COMMUNITY_IMAGE="${{ needs.build-images.outputs.community_image }}"
-          COMMUNITY_IMAGE_TAG="${{ needs.build-images.outputs.community_image_tag }}"
-          
-          echo "Community 镜像: $COMMUNITY_IMAGE"
-          echo "Community 镜像标签: $COMMUNITY_IMAGE_TAG"
-          
-          # 使用 sed 替换 deployment 中的镜像占位符
-          sed "s|PLACEHOLDER_COMMUNITY_IMAGE|$COMMUNITY_IMAGE|g" k8s/deployments/community-deployment.yaml > k8s/deployments/community-deployment-temp.yaml
-          
-          # 验证生成的 YAML
-          echo "=== 验证生成的 Community Deployment YAML ==="
-          cat k8s/deployments/community-deployment-temp.yaml | head -20
-          
-          # 应用更新后的 deployment
-          kubectl apply -f k8s/deployments/community-deployment-temp.yaml
-          
-          # 清理临时文件
-          rm -f k8s/deployments/community-deployment-temp.yaml
+          kubectl set image deployment/community-deployment -n ${{ env.NAMESPACE }} community-service=$COMMUNITY_IMAGE
       
       - name: ⏳ Wait for Community Deployment
         run: kubectl rollout status deployment/community-deployment -n ${{ env.NAMESPACE }} --timeout=180s
-      
-      - name: 🔍 Verify Community Pod
-        run: |
-          echo "=== 验证 Community Pod 状态 ==="
-          kubectl get pods -n ${{ env.NAMESPACE }} -l app=community-service
-          echo "=== Community Pod 详情 ==="
-          kubectl describe pod -n ${{ env.NAMESPACE }} -l app=community-service
       
       - name: 🌐 Get ALB URL
         id: get-alb-url
