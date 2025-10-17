@@ -583,8 +583,65 @@ jobs:
           # 清理临时文件
           rm -f k8s/deployments/backend-deployment-temp.yaml
       
+      # 🔥 新增：详细的部署诊断
+      - name: 🔍 Debug Backend Deployment
+        run: |
+          echo "=== Backend Deployment 诊断信息 ==="
+          echo "1. 检查 Deployment 状态:"
+          kubectl get deployment backend-deployment -n ${{ env.NAMESPACE }} -o wide
+          
+          echo "2. 检查 Pod 状态:"
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o wide
+          
+          echo "3. 检查 ReplicaSet 状态:"
+          kubectl get replicasets -n ${{ env.NAMESPACE }} -l app=backend
+          
+          echo "4. 检查 Pod 事件:"
+          kubectl get events -n ${{ env.NAMESPACE }} --field-selector involvedObject.kind=Pod --sort-by='.lastTimestamp' | grep backend
+          
+          echo "5. 检查新 Pod 的日志:"
+          NEW_POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend --sort-by='.metadata.creationTimestamp' -o jsonpath='{.items[-1].metadata.name}')
+          if [ -n "$NEW_POD" ]; then
+            echo "检查最新 Pod ($NEW_POD) 的日志:"
+            kubectl logs -n ${{ env.NAMESPACE }} $NEW_POD --tail=50 || echo "无法获取新 Pod 日志"
+          fi
+      
+      # 🔥 改进：更智能的等待策略
       - name: ⏳ Wait for Backend Deployment
-        run: kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
+        run: |
+          echo "=== 等待 Backend Deployment 就绪 ==="
+          TIMEOUT=600
+          INTERVAL=10
+          ELAPSED=0
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            STATUS=$(kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=10s 2>&1 || true)
+            
+            if echo "$STATUS" | grep -q "successfully rolled out"; then
+              echo "✅ Backend Deployment 成功"
+              exit 0
+            fi
+            
+            echo "⏰ 仍在等待... ($ELAPSED/$TIMEOUT 秒)"
+            echo "当前状态: $STATUS"
+            
+            # 每30秒显示详细状态
+            if [ $((ELAPSED % 30)) -eq 0 ]; then
+              echo "=== 详细状态 ==="
+              kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend
+              kubectl describe deployment backend-deployment -n ${{ env.NAMESPACE }} | grep -A10 "Conditions:"
+            fi
+            
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          echo "❌ Backend Deployment 超时"
+          echo "=== 最终诊断信息 ==="
+          kubectl describe deployment backend-deployment -n ${{ env.NAMESPACE }}
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=backend -o wide
+          kubectl logs -n ${{ env.NAMESPACE }} -l app=backend --tail=100
+          exit 1
       
       - name: 🔍 Verify Backend Pod
         run: |
