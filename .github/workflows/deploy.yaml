@@ -198,7 +198,9 @@ jobs:
         run: |
           IMAGE_TAG="${GITHUB_SHA:0:8}"
           BACKEND_IMAGE="$BACKEND_ECR_URL:$IMAGE_TAG"
-          if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
+          
+          # 使用 AWS CLI 检查镜像是否存在
+          if aws ecr describe-images --repository-name comic-website-prod-backend --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
             echo "image_exists=true" >> $GITHUB_OUTPUT
             echo "image_tag=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
             echo "image_tag_only=$IMAGE_TAG" >> $GITHUB_OUTPUT
@@ -560,7 +562,7 @@ jobs:
           kubectl apply -f service/backend-service.yaml
           kubectl apply -f deployments/backend-deployment.yaml
       
-      # 🔥 修改：使用正确的镜像标签替换
+      # 🔥 修改：修复镜像检查和使用正确的镜像标签
       - name: 🔄 Prepare Backend Deployment with Image
         run: |
           echo "=== 准备 Backend Deployment 镜像 ==="
@@ -570,30 +572,42 @@ jobs:
           echo "Backend 镜像: $BACKEND_IMAGE"
           echo "Backend 镜像标签: $BACKEND_IMAGE_TAG"
           
-          # 检查镜像是否存在
-          echo "=== 检查镜像是否存在 ==="
-          if docker manifest inspect $BACKEND_IMAGE > /dev/null 2>&1; then
+          # 🔥 修复：使用 AWS CLI 检查镜像是否存在
+          echo "=== 使用 AWS CLI 检查镜像是否存在 ==="
+          IMAGE_TAG="$BACKEND_IMAGE_TAG"
+          REPO_NAME="comic-website-prod-backend"
+          
+          # 使用 AWS CLI 检查镜像
+          if aws ecr describe-images --repository-name $REPO_NAME --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
             echo "✅ 镜像存在: $BACKEND_IMAGE"
           else
             echo "❌ 镜像不存在: $BACKEND_IMAGE"
             echo "可用的镜像标签:"
-            aws ecr list-images --repository-name comic-website-prod-backend --region us-east-1 --query 'imageIds[].imageTag' --output table || true
+            aws ecr list-images --repository-name $REPO_NAME --region ${{ env.AWS_REGION }} --query 'imageIds[].imageTag' --output table
             exit 1
           fi
           
-          # 使用 sed 替换 deployment 中的镜像
+          # 🔥 修复：使用正确的 sed 命令替换镜像
           echo "=== 替换 Backend Deployment 镜像 ==="
-          sed "s|image:.*|image: $BACKEND_IMAGE|g" k8s/deployments/backend-deployment.yaml > k8s/deployments/backend-deployment-temp.yaml
           
-          # 验证生成的 YAML
-          echo "=== 验证生成的 Backend Deployment YAML ==="
-          cat k8s/deployments/backend-deployment-temp.yaml | grep image:
+          # 先备份原文件
+          cp k8s/deployments/backend-deployment.yaml k8s/deployments/backend-deployment.yaml.backup
+          
+          # 使用 sed 替换镜像（更精确的匹配）
+          sed -i "s|image:.*comic-website-prod-backend.*|image: $BACKEND_IMAGE|g" k8s/deployments/backend-deployment.yaml
+          
+          # 验证替换结果
+          echo "=== 验证镜像替换结果 ==="
+          echo "替换后的镜像行:"
+          grep "image:" k8s/deployments/backend-deployment.yaml
           
           # 应用更新后的 deployment
-          kubectl apply -f k8s/deployments/backend-deployment-temp.yaml
+          kubectl apply -f k8s/deployments/backend-deployment.yaml
           
-          # 清理临时文件
-          rm -f k8s/deployments/backend-deployment-temp.yaml
+          # 恢复备份文件
+          mv k8s/deployments/backend-deployment.yaml.backup k8s/deployments/backend-deployment.yaml
+          
+          echo "✅ Backend Deployment 镜像更新完成"
       
       # 🔥 新增：详细的部署诊断
       - name: 🔍 Debug Backend Deployment
