@@ -73,11 +73,11 @@ spec:
           value: "/api"
         resources:
           requests:
-            memory: "512Mi"  # 🔥 增加内存请求
-            cpu: "250m"
+            memory: "128Mi"  # 🔥 增加内存请求
+            cpu: "100m"
           limits:
-            memory: "1Gi"    # 🔥 增加内存限制
-            cpu: "500m"
+            memory: "256Gi"    # 🔥 增加内存限制
+            cpu: "200m"
         # 🔥 修正的健康检查配置
         startupProbe:
           httpGet:
