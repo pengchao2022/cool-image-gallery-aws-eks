@@ -149,7 +149,7 @@ output "ec2_public_ip" {
   description = "EC2 instance public IP address"
   value       = module.ec2.ec2_public_ip
 }
-
+/*
 output "ec2_public_dns" {
   description = "EC2 instance public DNS name"
   value       = module.ec2.ec2_public_dns
@@ -165,3 +165,4 @@ output "community_repository_url" {
   description = "Community ECR repository URL"
   value       = module.ecr.community_repository_url
 }
+*/
