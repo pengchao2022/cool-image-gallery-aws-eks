@@ -9,7 +9,7 @@ private_subnet_cidrs = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 availability_zones   = ["us-east-1a", "us-east-1b", "us-east-1c"]
 
 # EKS 配置
-eks_instance_types  = ["t3.micro"]
+eks_instance_types  = ["t3.small"]
 eks_desired_size    = 8
 eks_max_size        = 8
 eks_min_size        = 8
