@@ -145,7 +145,7 @@ output "redis_port" {
 }
 
 # EC2 Outputs
-/*
+
 output "ec2_public_ip" {
   description = "EC2 instance public IP address"
   value       = module.ec2.ec2_public_ip
@@ -166,4 +166,3 @@ output "community_repository_url" {
   description = "Community ECR repository URL"
   value       = module.ecr.community_repository_url
 }
-*/
