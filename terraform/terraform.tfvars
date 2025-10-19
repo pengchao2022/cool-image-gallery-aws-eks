@@ -10,9 +10,9 @@ availability_zones   = ["us-east-1a", "us-east-1b", "us-east-1c"]
 
 # EKS 配置
 eks_instance_types  = ["t3.small"]
-eks_desired_size    = 8
-eks_max_size        = 8
-eks_min_size        = 8
+eks_desired_size    = 7
+eks_max_size        = 7
+eks_min_size        = 7
 eks_cluster_version = "1.28"
 
 # RDS 配置

@@ -1,4 +1,4 @@
-
+# terraform/outputs.tf
 
 # ECR 相关输出
 output "backend_repository_url" {
@@ -148,17 +148,17 @@ output "redis_port" {
 
 output "ec2_public_ip" {
   description = "EC2 instance public IP address"
-  value       = module.ec2_public_ip
+  value       = module.ec2.ec2_public_ip
 }
 
 output "ec2_public_dns" {
   description = "EC2 instance public DNS name"
-  value       = module.ec2_public_dns
+  value       = module.ec2.ec2_public_dns
 }
 
 output "ssh_connection_command" {
   description = "SSH connection command"
-  value       = "ssh -i ~/.ssh/id_rsa ubuntu@${module.ec2_public_ip}"
+  value       = "ssh -i ~/.ssh/id_rsa ubuntu@${module.ec2.ec2_public_ip}"
 }
 
 
