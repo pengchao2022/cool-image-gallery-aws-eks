@@ -5,11 +5,16 @@ In this demo, I will create a comic website, this site is for view comic images 
 
 ## Features
 
-- Frontend using React + nodejs
-
-- Backend using express + nodejs (including community part with a independent container)
-
-- Database using AWS RDS PostgreSQL
+- Frontend
+    - React
+    - Node.js (for build tooling)
+- Backend 
+    - Node.js
+    - Express.js
+    - Docker (with isolated container for community features)
+- Database 
+    - AWS RDS PostgreSQL
+    - AWS Elastichche (redis)
 
 - Terraform to create the infrastructure including EKS modules, ECR modules, IAM modules, Redis  
 
@@ -43,10 +48,12 @@ In this demo, I will create a comic website, this site is for view comic images 
 
 ![profile](./profile.png)
 
-- Here's the comic images registered uploaded
+- Here's the comic images colletion which registered users uploaded
 
 ![mycomic](./mycomic.png)
 
 - Here's the community for commits and likes:
 
 ![community](./community_service.png)
+
+Designed and Developed by Pengchao Ma @2025
